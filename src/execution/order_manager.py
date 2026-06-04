@@ -184,7 +184,7 @@ class OrderManager:
         )
 
         try:
-            api_response = api_instance.place_order(body, api_version="3.0")
+            api_response = api_instance.place_order(body)
             log.info(f"V3 Order placed: {api_response.data.order_id}")
             order.order_id = api_response.data.order_id
             order.status = "PENDING"
@@ -253,7 +253,6 @@ class OrderManager:
         if latest_state is None:
             return
 
-        # Zero gamma band: 0.5% default of spot (Rule 7)
         zero_gamma = getattr(latest_state, 'zero_gamma', None)
         spot = getattr(latest_state, 'spot', 0.0)
 
