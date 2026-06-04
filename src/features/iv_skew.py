@@ -27,8 +27,8 @@ def compute_iv_skew(chain: pd.DataFrame, spot: float) -> IVSkewResult:
     """
     if chain.empty:
         return IVSkewResult(0, 0, 0, 0, 0, "flat")
-    atm_strike = _nearest_strike(chain, spot)
-    row = chain.iloc[atm_strike]
+    idx = _nearest_strike(chain, spot)
+    row = chain.loc[idx]
     iv_c = float(row["ce_iv"])
     iv_p = float(row["pe_iv"])
     return IVSkewResult(

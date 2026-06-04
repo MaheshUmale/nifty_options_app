@@ -88,10 +88,15 @@ class SignalOrchestrator:
                 self.order_manager.degraded_mode = False
 
             try:
-                if chain is None or chain.empty:
+                if chain is None or (isinstance(chain, pd.DataFrame) and chain.empty):
                     continue
-                spot = float(chain["underlying_spot"].iloc[0]) if "underlying_spot" in chain.columns else 0.0
-                if spot == 0 and "spot" in chain.columns:
+
+                spot = 0.0
+                if "underlying_spot" in chain.columns and len(chain) > 0:
+                    spot = float(chain["underlying_spot"].iloc[0])
+
+                # If underlying_spot is missing or 0, fallback to spot column
+                if spot == 0 and "spot" in chain.columns and len(chain) > 0:
                     spot = float(chain["spot"].iloc[0])
                 if spot == 0:
                     continue
