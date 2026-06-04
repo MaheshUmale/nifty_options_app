@@ -1,0 +1,37 @@
+# Core data & numerics
+numpy>=1.24
+pandas>=2.0
+scipy>=1.11
+pyarrow>=14.0
+
+# Visualization & dashboard
+plotly>=5.18
+dash>=2.14
+dash-bootstrap-components>=1.5
+
+# Networking & APIs
+requests>=2.31
+websocket-client>=1.6
+protobuf>=4.25
+
+# Black-Scholes / Greeks (lightweight, no QuantLib dep)
+py_vollib>=1.0.1
+
+# Configuration & utils
+pyyaml>=6.0
+python-dotenv>=1.0
+pydantic>=2.5
+
+# Logging
+loguru>=0.7
+
+# Time
+pytz>=2023.3
+exchange-calendars>=4.5
+
+# Testing
+pytest>=7.4
+pytest-cov>=4.1
+
+# Async support (for WS + REST orchestration)
+aiohttp>=3.9
