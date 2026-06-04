@@ -184,7 +184,7 @@ class OrderManager:
         )
 
         try:
-            api_response = api_instance.place_order(body, api_version="3.0")
+            api_response = api_instance.place_order(body)
             log.info(f"V3 Order placed: {api_response.data.order_id}")
             order.order_id = api_response.data.order_id
             order.status = "PENDING"
@@ -227,9 +227,44 @@ class OrderManager:
             self.daily_pnl += pos.unrealized_pnl
             log.info("Closed {} reason={} pnl=₹{:.2f}", instrument, reason, pos.unrealized_pnl)
 
+    def flatten_all(self) -> None:
+        """Emergency flatten — close everything."""
+        for inst in list(self.positions.keys()):
+            self._close_position(inst, "flatten_all")
+        log.warning("All positions flattened; daily PnL: ₹{:.2f}", self.daily_pnl)
+
+    def kill(self) -> None:
+        """Activate kill-switch and flatten."""
+        self.kill_switch = True
+        self.flatten_all()
+        log.error("KILL SWITCH ACTIVATED")
+
     def summary(self) -> dict:
         return {
             "n_positions": len(self.positions),
             "daily_pnl": self.daily_pnl,
             "kill_switch": self.kill_switch,
         }
+
+    def handle_degraded_mode(self, latest_state) -> None:
+        """degraded-mode routine: halt new entries, liquidate open near-zero gamma positions instantly."""
+        self.kill_switch = True
+        log.warning("DEGRADED MODE ACTIVATED: Halting new entries.")
+        if latest_state is None:
+            return
+
+        zero_gamma = getattr(latest_state, 'zero_gamma', None)
+        spot = getattr(latest_state, 'spot', 0.0)
+
+        if zero_gamma and spot > 0:
+            zero_band_pct = 0.005
+            to_liquidate = []
+            for inst, pos in list(self.positions.items()):
+                dist = abs(spot - zero_gamma) / spot
+                if dist <= zero_band_pct:
+                    log.warning("Liquidating near-zero gamma position: {} due to connection watchdog trigger", inst)
+                    to_liquidate.append(inst)
+            for inst in to_liquidate:
+                self._close_position(inst, "watchdog_liquidation")
+        else:
+            log.warning("Degraded mode: No zero_gamma or spot info available for targeted liquidation.")

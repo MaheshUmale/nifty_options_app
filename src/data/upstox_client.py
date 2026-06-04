@@ -53,6 +53,7 @@ class UpstoxClient:
         """Exchanges auth code for access token and saves to .env."""
         api_instance = LoginApi(self.api_client)
         try:
+            # LoginApi.token requires api_version as the first argument in this SDK version
             api_response = api_instance.token(
                 api_version="2.0",
                 code=code,
@@ -78,33 +79,38 @@ class UpstoxClient:
         """GET /market-quote/ltp (V3)"""
         api_instance = MarketQuoteV3Api(self.api_client)
         try:
+            # MarketQuoteV3Api.get_ltp does NOT accept api_version keyword argument
             api_response = api_instance.get_ltp(
-                instrument_key=",".join(instrument_keys),
-                api_version="3.0"
+                instrument_key=",".join(instrument_keys)
             )
             return api_response.to_dict()
         except ApiException as e:
             log.error(f"Exception when calling MarketQuoteV3Api->get_ltp: {e}")
+            return {"status": "error", "errors": [str(e)]}
+        except TypeError as e:
+            log.error(f"Signature error in get_ltp: {e}")
             return {"status": "error", "errors": [str(e)]}
 
     def get_option_chain(self, instrument_key: str, expiry_date: str) -> dict[str, Any]:
         """GET /option/chain using OptionsApi"""
         api_instance = OptionsApi(self.api_client)
         try:
-            api_response = api_instance.get_option_chain(
+            # OptionsApi.get_put_call_option_chain signature: (instrument_key, expiry_date, **kwargs)
+            api_response = api_instance.get_put_call_option_chain(
                 instrument_key=instrument_key,
-                expiry_date=expiry_date,
-                api_version="2.0"
+                expiry_date=expiry_date
             )
             return api_response.to_dict()
         except ApiException as e:
-            log.error(f"Exception when calling OptionsApi->get_option_chain: {e}")
+            log.error(f"Exception when calling OptionsApi->get_put_call_option_chain: {e}")
             return {"status": "error", "errors": [str(e)]}
 
 def make_client_from_env() -> UpstoxClient:
     """Factory to create client using .env variables."""
+    # Ensure .env is loaded
     env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
     load_dotenv(env_path)
+
     creds = UpstoxCreds(
         api_key=os.getenv("UPSTOX_API_KEY", ""),
         api_secret=os.getenv("UPSTOX_API_SECRET", ""),
