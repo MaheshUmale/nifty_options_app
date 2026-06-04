@@ -21,7 +21,7 @@ build/
 *.key
 
 # Data
-data/
+/data/
 logs/
 *.parquet
 *.csv
