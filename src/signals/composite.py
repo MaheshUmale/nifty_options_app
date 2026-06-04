@@ -70,7 +70,12 @@ class CompositeEngine:
         `prev_chain` (optional) is used to compute OI delta and to derive
         OI buildup flags.
         """
-        ts = timestamp or (chain["timestamp"].iloc[0] if not chain.empty else pd.Timestamp.now(tz="Asia/Kolkata"))
+        if timestamp:
+            ts = timestamp
+        elif not chain.empty and "timestamp" in chain.columns:
+            ts = chain["timestamp"].iloc[0]
+        else:
+            ts = pd.Timestamp.now(tz="Asia/Kolkata")
         ts = pd.Timestamp(ts)
         if ts.tzinfo is None:
             ts = ts.tz_localize("Asia/Kolkata")
@@ -83,7 +88,13 @@ class CompositeEngine:
             return st
 
         # ---------- 1) PCR ----------
-        pcr_res = compute_pcr(chain, mode="volume")
+        try:
+            pcr_res = compute_pcr(chain, mode="volume")
+        except Exception as e:
+            log.error(f"Error computing PCR: {e}")
+            st.decision = "HOLD"
+            st.decision_reasons.append(f"PCR error: {e}")
+            return st
         st.pcr = pcr_res.pcr
         st.pcr_regime = pcr_res.regime
 
