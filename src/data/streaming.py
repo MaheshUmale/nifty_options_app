@@ -1,5 +1,5 @@
 """
-Upstox V3 WebSocket (Protobuf) Integration.
+Upstox V3 WebSocket (Protobuf) Integration using official SDK.
 Provides a client to stream real-time data.
 """
 from __future__ import annotations
@@ -11,69 +11,50 @@ from typing import Any, Callable
 from queue import Queue
 import threading
 
-import websockets
+from upstox_client import MarketDataStreamerV3
 from utils.logger import get_logger
+from data.upstox_client import make_client_from_env
 
 log = get_logger()
 
 class UpstoxStreamer:
-    """WebSocket client for Upstox V3 Market Data."""
+    """WebSocket client for Upstox V3 Market Data using official SDK."""
 
     def __init__(self, access_token: str):
         self.access_token = access_token
-        self.uri = "wss://api.upstox.com/v2/feed/market-data-feed"
-        self.ws = None
-        self.callbacks: list[Callable[[dict], None]] = []
+        self.streamer = MarketDataStreamerV3(access_token)
+        self._setup_callbacks()
 
-    def add_callback(self, cb: Callable[[dict], None]):
-        self.callbacks.append(cb)
+    def _setup_callbacks(self):
+        self.streamer.on("open", self._on_open)
+        self.streamer.on("message", self._on_message)
+        self.streamer.on("error", self._on_error)
+        self.streamer.on("close", self._on_close)
 
-    async def connect(self):
+    def _on_open(self):
+        log.info("Upstox V3 WebSocket connected.")
+
+    def _on_message(self, message):
+        log.debug(f"Received message: {message}")
+
+    def _on_error(self, error):
+        log.error(f"WebSocket error: {error}")
+
+    def _on_close(self, close_status_code, close_msg):
+        log.warning(f"WebSocket closed: {close_status_code} - {close_msg}")
+
+    def connect(self):
         """Connects to the WebSocket feed."""
-        headers = {
-            "Authorization": f"Bearer {self.access_token}"
-        }
-        try:
-            self.ws = await websockets.connect(self.uri, extra_headers=headers)
-            log.info("WebSocket connected to Upstox.")
-        except Exception as e:
-            log.error(f"Failed to connect to Upstox WebSocket: {e}")
-            raise
+        self.streamer.connect()
 
-    async def subscribe(self, instrument_keys: list[str], mode: str = "full"):
+    def subscribe(self, instrument_keys: list[str], mode: str = "full"):
         """Subscribes to instruments."""
-        if not self.ws:
-            await self.connect()
-
-        payload = {
-            "guid": "guid123",
-            "method": "sub",
-            "data": {
-                "mode": mode,
-                "instrumentKeys": instrument_keys
-            }
-        }
-        await self.ws.send(json.dumps(payload))
+        # mode can be 'ltp', 'full'
+        self.streamer.subscribe(instrument_keys, mode)
         log.info(f"Subscribed to {len(instrument_keys)} instruments in {mode} mode.")
 
-    async def listen(self):
-        """Main loop to listen for messages."""
-        if not self.ws:
-            await self.connect()
-
-        try:
-            async for message in self.ws:
-                try:
-                    data = json.loads(message)
-                except:
-                    data = {"raw": str(message)}
-
-                for cb in self.callbacks:
-                    cb(data)
-        except websockets.exceptions.ConnectionClosed:
-            log.warning("WebSocket connection closed.")
-        except Exception as e:
-            log.error(f"Error in WebSocket listener: {e}")
+    def disconnect(self):
+        self.streamer.disconnect()
 
 class MockWebSocket:
     """Synthetic WebSocket for testing."""
@@ -82,9 +63,6 @@ class MockWebSocket:
         self.interval = 1.0 / rate_hz
         self.queue = Queue()
         self.is_running = False
-
-    def add_callback(self, cb):
-        pass # Not used in orchestrator pattern
 
     def start(self, n_minutes: int = 375):
         self.is_running = True
@@ -108,10 +86,10 @@ class MockWebSocket:
 
 class UpstoxLiveSource:
     """
-    Live data source using Upstox REST API polling.
+    Live data source using Upstox SDK (polling for now, extensible to WS).
+    Uses V3 endpoints for market quotes.
     """
     def __init__(self, poll_interval_sec: float = 5.0):
-        from data.upstox_client import make_client_from_env
         self.poll_interval = poll_interval_sec
         self.queue = Queue()
         self.client = make_client_from_env()
@@ -123,7 +101,7 @@ class UpstoxLiveSource:
         self._stop.clear()
         self._thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._thread.start()
-        log.info("UpstoxLiveSource started (polling every {}s)", self.poll_interval)
+        log.info("UpstoxLiveSource (V3) started (polling every {}s)", self.poll_interval)
 
     def stop(self):
         self._stop.set()
@@ -135,27 +113,30 @@ class UpstoxLiveSource:
         import pandas as pd
         while not self._stop.is_set():
             try:
-                quote = self.client.get_market_quote([self.instrument_key])
-                if quote.get("status") == "success":
-                    spot = quote["data"][self.instrument_key]["last_price"]
-                    # Assume current expiry for demo
-                    from datetime import datetime, timedelta
-                    today = datetime.now()
-                    # Next Thursday
-                    days_ahead = 3 - today.weekday()
-                    if days_ahead < 0: days_ahead += 7
-                    next_thursday = (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+                # Use V3 LTP endpoint
+                resp = self.client.get_market_quote_ltp([self.instrument_key])
+                if resp.get("status") == "success":
+                    data = resp.get("data", {})
+                    if self.instrument_key in data:
+                        spot = data[self.instrument_key]["last_price"]
 
-                    chain_resp = self.client.get_option_chain(self.instrument_key, next_thursday)
-                    if chain_resp.get("status") == "success":
-                        df = self._transform_chain(chain_resp["data"], spot)
-                        self.queue.put(df)
-                    else:
-                        log.error("Live Option Chain failed: {}", chain_resp.get("errors"))
+                        # Fetch Option Chain (Still V2 as per SDK dir, but used within V3 context)
+                        from datetime import datetime, timedelta
+                        today = datetime.now()
+                        days_ahead = 3 - today.weekday()
+                        if days_ahead < 0: days_ahead += 7
+                        next_thursday = (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+                        chain_resp = self.client.get_option_chain(self.instrument_key, next_thursday)
+                        if chain_resp.get("status") == "success":
+                            df = self._transform_chain(chain_resp["data"], spot)
+                            self.queue.put(df)
+                        else:
+                            log.error("Live Option Chain failed: {}", chain_resp.get("errors"))
                 else:
-                    log.error("Live Spot Quote failed: {}", quote.get("errors"))
+                    log.error("Live Spot Quote (V3) failed: {}", resp.get("errors"))
             except Exception as e:
-                log.error("Error in UpstoxLiveSource: {}", e)
+                log.error("Error in UpstoxLiveSource (V3): {}", e)
             time.sleep(self.poll_interval)
 
     def _transform_chain(self, data, spot):

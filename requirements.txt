@@ -13,6 +13,7 @@ dash-bootstrap-components>=1.5
 requests>=2.31
 websocket-client>=1.6
 protobuf>=4.25
+upstox-python-sdk>=2.27.0
 
 # Black-Scholes / Greeks (lightweight, no QuantLib dep)
 py_vollib>=1.0.1
