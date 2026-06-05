@@ -8,7 +8,7 @@
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         body { background-color: #111827; color: #f3f4f6; }
-        .chart-container { height: 400px; width: 100%; }
+        .chart-container { height: 400px; width: 100%; border: 1px solid #1f2937; border-radius: 0.5rem; overflow: hidden; }
         .tick-stream { height: 150px; overflow-y: auto; }
         .signal-card { border-left-width: 4px; }
     </style>
@@ -26,30 +26,30 @@
         <!-- KPI Row -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-blue-500">
-                <h3 class="text-gray-400 text-sm uppercase">NIFTY Spot</h3>
-                <div id="spot-price" class="text-3xl font-mono font-bold">—</div>
+                <h3 class="text-gray-400 text-sm uppercase font-semibold">NIFTY Spot</h3>
+                <div id="spot-price" class="text-3xl font-mono font-bold text-blue-400">—</div>
             </div>
             <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-green-500">
-                <h3 class="text-gray-400 text-sm uppercase">Decision</h3>
+                <h3 class="text-gray-400 text-sm uppercase font-semibold">Decision</h3>
                 <div id="signal-decision" class="text-3xl font-mono font-bold">—</div>
-                <div id="signal-confidence" class="text-sm text-gray-400"></div>
+                <div id="signal-confidence" class="text-xs text-gray-500"></div>
             </div>
             <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-purple-500">
-                <h3 class="text-gray-400 text-sm uppercase">PCR</h3>
-                <div id="pcr-val" class="text-3xl font-mono font-bold">—</div>
-                <div id="pcr-regime" class="text-sm text-gray-400"></div>
+                <h3 class="text-gray-400 text-sm uppercase font-semibold">PCR</h3>
+                <div id="pcr-val" class="text-3xl font-mono font-bold text-purple-400">—</div>
+                <div id="pcr-regime" class="text-xs text-gray-500"></div>
             </div>
             <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-yellow-500">
-                <h3 class="text-gray-400 text-sm uppercase">Net GEX</h3>
-                <div id="gex-val" class="text-3xl font-mono font-bold">—</div>
-                <div id="gex-regime" class="text-sm text-gray-400"></div>
+                <h3 class="text-gray-400 text-sm uppercase font-semibold">Net GEX</h3>
+                <div id="gex-val" class="text-3xl font-mono font-bold text-yellow-400">—</div>
+                <div id="gex-regime" class="text-xs text-gray-500"></div>
             </div>
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <!-- Main Chart Area -->
             <div class="lg:col-span-2 space-y-6">
-                <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+                <div class="bg-gray-800 p-2 rounded-lg shadow-lg">
                     <div id="chart" class="chart-container"></div>
                 </div>
 
@@ -90,6 +90,7 @@
     </div>
 
     <script>
+        console.log("Initializing Dashboard...");
         const statusEl = document.getElementById('connection-status');
         const spotPriceEl = document.getElementById('spot-price');
         const decisionEl = document.getElementById('signal-decision');
@@ -105,46 +106,83 @@
         const lastUpdatedEl = document.getElementById('last-updated');
 
         // Initialize Chart
-        const chart = LightweightCharts.createChart(document.getElementById('chart'), {
-            layout: { backgroundColor: '#111827', textColor: '#d1d5db' },
-            grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
-            timeScale: { timeVisible: true, secondsVisible: true },
+        const chartContainer = document.getElementById('chart');
+        const chart = LightweightCharts.createChart(chartContainer, {
+            layout: {
+                background: { type: 'solid', color: '#111827' },
+                textColor: '#d1d5db'
+            },
+            grid: {
+                vertLines: { color: '#1f2937' },
+                horzLines: { color: '#1f2937' }
+            },
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: true,
+                borderColor: '#4b5563'
+            },
+            rightPriceScale: {
+                borderColor: '#4b5563',
+                autoScale: true
+            }
         });
 
-        const lineSeries = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2 });
+        const lineSeries = chart.addAreaSeries({
+            lineColor: '#3b82f6',
+            topColor: 'rgba(59, 130, 246, 0.4)',
+            bottomColor: 'rgba(59, 130, 246, 0.0)',
+            lineWidth: 2,
+            title: 'NIFTY Spot'
+        });
 
         let socket;
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            socket = new WebSocket(`${protocol}//${window.location.host}/ws/ticks`);
+            const wsUrl = `${protocol}//${window.location.host}/ws/ticks`;
+            console.log("Connecting to WebSocket:", wsUrl);
+            socket = new WebSocket(wsUrl);
 
             socket.onopen = () => {
+                console.log("WebSocket connected!");
                 statusEl.innerText = 'Connected';
                 statusEl.className = 'px-3 py-1 rounded-full text-sm bg-green-900 text-green-200';
             };
 
             socket.onmessage = (event) => {
-                const payload = JSON.parse(event.data);
-                if (payload.type === 'tick') handleTick(payload.data);
-                if (payload.type === 'signal') handleSignal(payload);
+                try {
+                    const payload = JSON.parse(event.data);
+                    if (payload.type === 'tick') handleTick(payload.data);
+                    else if (payload.type === 'signal') handleSignal(payload);
+                } catch (e) {
+                    console.error("Error parsing message:", e);
+                }
             };
 
             socket.onclose = () => {
+                console.warn("WebSocket disconnected. Reconnecting...");
                 statusEl.innerText = 'Disconnected';
                 statusEl.className = 'px-3 py-1 rounded-full text-sm bg-red-900 text-red-200';
                 setTimeout(connect, 3000);
             };
+
+            socket.onerror = (err) => {
+                console.error("WebSocket Error:", err);
+            };
         }
 
         function handleTick(tick) {
-            if (tick.instrument_key === "NSE_INDEX|Nifty 50") {
+            // console.log("Tick received:", tick.instrument_key, tick.ltp);
+            if (tick.instrument_key === "NSE_INDEX|Nifty 50" || tick.instrument_key === "NSE_INDEX:Nifty 50") {
                 spotPriceEl.innerText = `₹${tick.ltp.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
-                lineSeries.update({ time: Math.floor(Date.now() / 1000), value: tick.ltp });
+                lineSeries.update({
+                    time: Math.floor(Date.now() / 1000),
+                    value: tick.ltp
+                });
             }
 
             const line = document.createElement('div');
-            line.className = 'border-b border-gray-900 py-1';
-            line.innerText = `[${new Date().toLocaleTimeString()}] ${tick.instrument_key}: ${tick.ltp}`;
+            line.className = 'border-b border-gray-900 py-1 flex justify-between';
+            line.innerHTML = `<span>${tick.instrument_key}</span> <span class="font-bold">${tick.ltp}</span>`;
             tickStreamEl.prepend(line);
             if (tickStreamEl.childNodes.length > 50) tickStreamEl.removeChild(tickStreamEl.lastChild);
 
@@ -152,6 +190,7 @@
         }
 
         function handleSignal(payload) {
+            console.log("Signal received:", payload);
             const st = payload.data;
             decisionEl.innerText = st.decision;
             decisionEl.className = `text-3xl font-mono font-bold ${st.decision === 'GO' ? 'text-green-500' : st.decision === 'NO-GO' ? 'text-red-500' : 'text-gray-400'}`;
@@ -172,13 +211,17 @@
             ];
             subSignalsEl.innerHTML = subs.map(s => `
                 <div class="bg-gray-700 p-2 rounded text-center">
-                    <div class="text-xs text-gray-400 uppercase">${s.name}</div>
+                    <div class="text-xs text-gray-400 uppercase font-semibold">${s.name}</div>
                     <div class="text-sm font-bold ${getColorForSignal(s.val)}">${s.val}</div>
                 </div>
             `).join('');
 
             // Reasons
-            reasonsEl.innerHTML = st.decision_reasons.map(r => `<div class="flex gap-2"><span class="text-blue-500">•</span> <span>${r}</span></div>`).join('');
+            if (st.decision_reasons && st.decision_reasons.length > 0) {
+                reasonsEl.innerHTML = st.decision_reasons.map(r => `<div class="flex gap-2"><span class="text-blue-500">•</span> <span>${r}</span></div>`).join('');
+            } else {
+                reasonsEl.innerHTML = '<p class="text-gray-500 italic">No specific reasons provided.</p>';
+            }
 
             // Positions
             if (payload.positions) {
@@ -187,6 +230,7 @@
         }
 
         function getColorForSignal(val) {
+            if (!val) return 'text-gray-300';
             if (val.includes('BUY')) return 'text-green-400';
             if (val.includes('NO_TRADE')) return 'text-yellow-400';
             if (val.includes('NO-GO')) return 'text-red-400';
@@ -195,7 +239,7 @@
 
         connect();
         window.addEventListener('resize', () => {
-            chart.applyOptions({ width: document.getElementById('chart').clientWidth });
+            chart.applyOptions({ width: chartContainer.clientWidth });
         });
     </script>
 </body>

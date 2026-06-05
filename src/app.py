@@ -134,6 +134,16 @@ async def lifespan(app: FastAPI):
     # 7. Toggle mock generator based on APP_MODE
     if mode == "mock":
         logger.info("Starting mock tick generator (APP_MODE=mock)")
+        # Initialize some mock option keys for the generator
+        for strike in [23800, 23900, 24000, 24100, 24200]:
+            for side in ["CE", "PE"]:
+                key = f"MOCK_NSE_FO|{strike}{side}"
+                option_key_to_strike_info[key] = {
+                    "strike": float(strike),
+                    "side": side,
+                    "greeks": {"delta": 0.5 if side == "CE" else -0.5, "gamma": 0.001, "theta": -1, "vega": 0.1, "iv": 15},
+                    "expiry": "2026-06-12"
+                }
         asyncio.create_task(mock_tick_generator())
     else:
         logger.info(f"Live mode active (APP_MODE={mode}). Running event-driven signals.")
@@ -284,17 +294,25 @@ async def mock_tick_generator():
     price = 24000.0
     while True:
         await asyncio.sleep(1)
-        price += random.uniform(-5, 5)
-        tick = {
+        price += random.uniform(-2, 2)
+
+        # Spot tick
+        await handle_new_tick({
             "instrument_key": "NSE_INDEX|Nifty 50",
             "ltp": round(price, 2),
             "volume": random.randint(1000, 5000),
             "oi": random.randint(100000, 500000)
-        }
-        await broadcast_payload({
-            "type": "tick",
-            "data": tick
         })
+
+        # Option ticks
+        for key in list(option_key_to_strike_info.keys()):
+            if "MOCK" in key:
+                await handle_new_tick({
+                    "instrument_key": key,
+                    "ltp": round(random.uniform(50, 200), 2),
+                    "volume": random.randint(100, 500),
+                    "oi": random.randint(1000, 5000)
+                })
 
 @app.get("/")
 async def get_index(request: Request):

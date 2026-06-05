@@ -15,9 +15,20 @@ from loguru import logger
 class DuckDBManager:
     """
     Manages DuckDB connections and asynchronous data flushing.
+
+    Attributes:
+        db_path (str): Path to the DuckDB file.
+        buffer (list): In-memory storage for incoming ticks.
+        lock (asyncio.Lock): Lock to ensure thread-safe access to the buffer during flushes.
     """
 
     def __init__(self, db_path: str | Path | None = None):
+        """
+        Initializes the DuckDBManager.
+
+        Args:
+            db_path (str | Path | None): Optional custom path for the database file.
+        """
         if db_path is None:
             root = Path(__file__).resolve().parent.parent
             data_dir = root / "data"
@@ -32,7 +43,11 @@ class DuckDBManager:
         self._init_db()
 
     def _init_db(self):
-        """Initializes the DuckDB schema and opens a persistent connection."""
+        """
+        Initializes the DuckDB schema and opens a persistent connection.
+
+        This creates the 'ticks' table if it does not exist.
+        """
         logger.info(f"Initializing DuckDB at {self.db_path}")
         self._con = duckdb.connect(self.db_path)
         self._con.execute("""
@@ -49,7 +64,12 @@ class DuckDBManager:
         logger.success("DuckDB schema initialized and connection opened.")
 
     async def start_flusher(self, interval: float = 2.0):
-        """Starts the background flusher task."""
+        """
+        Starts the background flusher task.
+
+        Args:
+            interval (float): Seconds between database flushes.
+        """
         if self.flusher_task is not None:
             return
 
@@ -57,7 +77,11 @@ class DuckDBManager:
         logger.info(f"DuckDB flusher started with interval {interval}s")
 
     async def stop_flusher(self):
-        """Stops the background flusher task and closes the connection."""
+        """
+        Stops the background flusher task and closes the connection.
+
+        Ensures any remaining data in the buffer is flushed before closing.
+        """
         if self.flusher_task:
             self.flusher_task.cancel()
             try:
@@ -73,18 +97,33 @@ class DuckDBManager:
             logger.info("DuckDB connection closed.")
 
     async def _flush_loop(self, interval: float):
-        """Internal loop for periodic flushing."""
+        """
+        Internal loop for periodic flushing.
+
+        Args:
+            interval (float): The sleep duration between flushes.
+        """
         while True:
             await asyncio.sleep(interval)
             await self.flush_to_db()
 
     async def append_tick(self, tick: dict[str, Any]):
-        """Appends a tick to the in-memory buffer."""
+        """
+        Appends a tick to the in-memory buffer.
+
+        Args:
+            tick (dict): The tick data to store.
+        """
         async with self.lock:
             self.buffer.append(tick)
 
     async def flush_to_db(self):
-        """Converts buffer to DataFrame and bulk inserts into DuckDB."""
+        """
+        Converts buffer to DataFrame and bulk inserts into DuckDB.
+
+        Uses a context manager lock to safely copy the buffer before insertion.
+        Empty columns are reindexed to match the database schema.
+        """
         async with self.lock:
             if not self.buffer:
                 return
