@@ -48,7 +48,17 @@ class MarketDataStore:
                     pe_volume BIGINT,
                     pe_oi DOUBLE,
                     tradingsymbol_ce VARCHAR,
-                    tradingsymbol_pe VARCHAR
+                    tradingsymbol_pe VARCHAR,
+                    ce_iv DOUBLE,
+                    pe_iv DOUBLE,
+                    ce_delta DOUBLE,
+                    pe_delta DOUBLE,
+                    ce_gamma DOUBLE,
+                    pe_gamma DOUBLE,
+                    ce_theta DOUBLE,
+                    pe_theta DOUBLE,
+                    ce_vega DOUBLE,
+                    pe_vega DOUBLE
                 )
             """)
 
@@ -59,22 +69,21 @@ class MarketDataStore:
 
         try:
             # Prepare the DataFrame for insertion (matching the schema)
-            # UpstoxLiveSource._transform_chain produces a DF with these columns:
-            # timestamp, spot, expiry, strike, ce_ltp, ce_volume, ce_oi, pe_ltp, pe_volume, pe_oi, etc.
+            # Add underlying_symbol (default to NIFTY)
+            df = df.copy()
+            df["underlying_symbol"] = "NIFTY"
 
-            # Map columns to schema
-            insert_df = df[[
-                "timestamp", "spot", "expiry", "strike",
+            # Reorder to match schema exactly
+            schema_cols = [
+                "timestamp", "underlying_symbol", "expiry", "strike", "spot",
                 "ce_ltp", "ce_volume", "ce_oi",
                 "pe_ltp", "pe_volume", "pe_oi",
-                "tradingsymbol_ce", "tradingsymbol_pe"
-            ]].copy()
-
-            # Add underlying_symbol (default to NIFTY)
-            insert_df["underlying_symbol"] = "NIFTY"
-
-            # Reorder to match schema exactly for safety (optional with DuckDB)
-            # con.append works well with matching names
+                "tradingsymbol_ce", "tradingsymbol_pe",
+                "ce_iv", "pe_iv", "ce_delta", "pe_delta",
+                "ce_gamma", "pe_gamma", "ce_theta", "pe_theta",
+                "ce_vega", "pe_vega"
+            ]
+            insert_df = df[schema_cols]
 
             with duckdb.connect(self.db_path) as con:
                 con.execute("INSERT INTO option_chain_snapshots SELECT * FROM insert_df")

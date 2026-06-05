@@ -37,16 +37,31 @@ def cmd_dashboard(args) -> int:
 
 
 def cmd_backtest(args) -> int:
-    """Run a backtest. Default: synthetic data. Use --source nse --csv to replay NSE files."""
+    """Run a backtest. Default: synthetic data. Use --source db to replay from DuckDB."""
     from backtest.engine import Backtester, summarize
-    from data.mock_data import build_intraday_dataset
     from signals.composite import CompositeEngine
 
-    if args.csv:
+    if args.source == "db":
+        from data.store import MarketDataStore
+        store = MarketDataStore()
+        log.info("Loading market data from DuckDB for backtest...")
+        ds = store.load_data(start_date=args.start_date, end_date=args.end_date)
+        if ds.empty:
+            log.error("No data found in DuckDB for the specified range.")
+            return 1
+        log.info("Loaded {} rows from DuckDB", len(ds))
+        # Add dummy spot_volume if missing
+        if "spot_volume" not in ds.columns:
+            ds["spot_volume"] = 0
+
+        spot_df = ds.groupby("timestamp").agg({"spot": "first", "spot_volume": "first"}).reset_index()
+        chains = [g.reset_index(drop=True) for _, g in ds.groupby("timestamp")]
+    elif args.csv:
         # Real NSE replay (CSV must contain timestamp, strike, ce_ltp, pe_ltp, etc.)
         raise NotImplementedError("NSE CSV replay not yet implemented; please contribute.")
     else:
         # Synthetic
+        from data.mock_data import build_intraday_dataset
         log.info(f"Generating {args.minutes} min of synthetic intraday data (seed={args.seed})")
         ds = build_intraday_dataset(n_minutes=args.minutes, seed=args.seed)
         # Build spot_df and chain list
@@ -221,8 +236,10 @@ def main() -> int:
     p_bt.add_argument("--seed", type=int, default=42)
     p_bt.add_argument("--capital", type=float, default=1_000_000)
     p_bt.add_argument("--lot-size", type=int, default=75)
-    p_bt.add_argument("--source", choices=["synthetic", "nse"], default="synthetic")
+    p_bt.add_argument("--source", choices=["synthetic", "nse", "db"], default="synthetic")
     p_bt.add_argument("--csv", type=str, default=None)
+    p_bt.add_argument("--start-date", type=str, default=None, help="YYYY-MM-DD for DB source")
+    p_bt.add_argument("--end-date", type=str, default=None, help="YYYY-MM-DD for DB source")
     p_bt.set_defaults(func=cmd_backtest)
 
     # smoke

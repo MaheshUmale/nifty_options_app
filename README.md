@@ -15,9 +15,10 @@
 - **Mock mode**: deterministic synthetic NIFTY option-chain generator for dev & backtest
 - **5 feature modules**: PCR, IV Skew/Trend/Theta, GEX (+Walls +Zero-Gamma), OI Walls/Max Pain, VWAP
 - **Composite signal engine** with 4 sub-signals + Master Execution Matrix decision logic
-- **Backtester** with realistic slippage, commissions, position sizing, and Sharpe/Drawdown metrics
+- **Backtester** with support for synthetic and real polled market data (from DuckDB)
 - **Order manager** with risk controls (max notional, daily-loss kill-switch, time stops)
 - **Dash dashboard** with live PCR/GEX/IV/VWAP charts and decision cards
+- **Data Persistence**: Automatic storage of live option chain snapshots in **DuckDB** for future analysis
 - **23 unit tests** covering features, signals, and backtester
 
 ## 🏗️ Architecture
@@ -32,7 +33,8 @@ nifty_options_app/
 │   ├── config.py            # config loader (yaml + env)
 │   ├── data/
 │   │   ├── upstox_client.py # OAuth2 + REST (option chain, PCR, OI, max-pain)
-│   │   ├── streaming.py     # WebSocket V3 (Protobuf → JSON) + MockWebSocket
+   │   ├── streaming.py     # Polling-based REST streaming (replaces WebSocket)
+   │   ├── store.py         # DuckDB persistent storage layer
 │   │   └── mock_data.py     # Synthetic NIFTY option-chain generator
 │   ├── features/
 │   │   ├── pcr.py           # Put/Call Ratio (volume & OI) + regime classification
@@ -94,11 +96,18 @@ Sample output:
 SMOKE TEST COMPLETE ✓
 ```
 
-### 3. Backtest on synthetic data
+### 3. Backtest (Synthetic or Real)
+
+**On synthetic data:**
 ```bash
 python -m main backtest --minutes 375 --seed 7
 ```
-Runs a full-day (6.25h) intraday backtest:
+
+**On real data stored in DuckDB:**
+```bash
+python -m main backtest --source db
+```
+Runs an intraday backtest using real snapshots captured during live mode.
 ```
 ============================================================
 BACKTEST RESULTS
