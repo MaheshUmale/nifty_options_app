@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NIFTY Zero-Lag Scalper</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        body { background-color: #111827; color: #f3f4f6; }
+        .chart-container { height: 500px; width: 100%; }
+    </style>
+</head>
+<body class="font-sans antialiased">
+    <div class="container mx-auto p-4">
+        <header class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-blue-500">NIFTY Zero-Lag Scalper</h1>
+            <div id="connection-status" class="px-3 py-1 rounded-full text-sm bg-red-900 text-red-200">Disconnected</div>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-blue-500">
+                <h3 class="text-gray-400 text-sm uppercase">NIFTY Spot</h3>
+                <div id="spot-price" class="text-3xl font-mono font-bold">—</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-green-500">
+                <h3 class="text-gray-400 text-sm uppercase">24h Change</h3>
+                <div id="price-change" class="text-3xl font-mono font-bold">—</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-purple-500">
+                <h3 class="text-gray-400 text-sm uppercase">Volume</h3>
+                <div id="volume" class="text-3xl font-mono font-bold">—</div>
+            </div>
+            <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-yellow-500">
+                <h3 class="text-gray-400 text-sm uppercase">OI</h3>
+                <div id="oi" class="text-3xl font-mono font-bold">—</div>
+            </div>
+        </div>
+
+        <div class="bg-gray-800 p-4 rounded-lg shadow-lg mb-6">
+            <div id="chart" class="chart-container"></div>
+        </div>
+
+        <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+            <h3 class="text-xl font-bold mb-4">Live Tick Stream</h3>
+            <div id="tick-stream" class="font-mono text-xs h-32 overflow-y-auto bg-black p-2 rounded border border-gray-700">
+                <!-- Ticks will appear here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const spotPriceEl = document.getElementById('spot-price');
+        const priceChangeEl = document.getElementById('price-change');
+        const volumeEl = document.getElementById('volume');
+        const oiEl = document.getElementById('oi');
+        const statusEl = document.getElementById('connection-status');
+        const tickStreamEl = document.getElementById('tick-stream');
+
+        // Initialize TradingView Lightweight Chart
+        const chartElement = document.getElementById('chart');
+        const chart = LightweightCharts.createChart(chartElement, {
+            layout: {
+                backgroundColor: '#111827',
+                textColor: '#d1d5db',
+            },
+            grid: {
+                vertLines: { color: '#1f2937' },
+                horzLines: { color: '#1f2937' },
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+            rightPriceScale: {
+                borderColor: '#4b5563',
+            },
+            timeScale: {
+                borderColor: '#4b5563',
+                timeVisible: true,
+                secondsVisible: true,
+            },
+        });
+
+        const areaSeries = chart.addLineSeries({
+            color: '#3b82f6',
+            lineWidth: 2,
+        });
+
+        // WebSocket connection
+        let socket;
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = new WebSocket(`${protocol}//${window.location.host}/ws/ticks`);
+
+            socket.onopen = () => {
+                statusEl.innerText = 'Connected';
+                statusEl.classList.replace('bg-red-900', 'bg-green-900');
+                statusEl.classList.replace('text-red-200', 'text-green-200');
+                console.log('WebSocket connected');
+            };
+
+            socket.onmessage = (event) => {
+                const tick = JSON.parse(event.data);
+                updateUI(tick);
+            };
+
+            socket.onclose = () => {
+                statusEl.innerText = 'Disconnected';
+                statusEl.classList.replace('bg-green-900', 'bg-red-900');
+                statusEl.classList.replace('text-green-200', 'text-red-200');
+                console.log('WebSocket disconnected. Reconnecting...');
+                setTimeout(connect, 3000);
+            };
+
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                socket.close();
+            };
+        }
+
+        function updateUI(tick) {
+            // Only update if it's the main index for now
+            if (tick.instrument_key === "NSE_INDEX|Nifty 50" || tick.instrument_key === "NSE_INDEX:Nifty 50") {
+                const ltp = tick.ltp;
+                spotPriceEl.innerText = `₹${ltp.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+                volumeEl.innerText = tick.volume ? tick.volume.toLocaleString('en-IN') : '—';
+                oiEl.innerText = tick.oi ? tick.oi.toLocaleString('en-IN') : '—';
+
+                // Update chart
+                areaSeries.update({
+                    time: Math.floor(Date.now() / 1000),
+                    value: ltp
+                });
+            }
+
+            // Append to tick stream
+            const tickLine = document.createElement('div');
+            tickLine.innerText = `[${new Date().toLocaleTimeString()}] ${tick.instrument_key}: ${tick.ltp}`;
+            tickStreamEl.prepend(tickLine);
+            if (tickStreamEl.childNodes.length > 50) {
+                tickStreamEl.removeChild(tickStreamEl.lastChild);
+            }
+        }
+
+        connect();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            chart.applyOptions({
+                width: chartElement.clientWidth,
+                height: chartElement.clientHeight
+            });
+        });
+    </script>
+</body>
+</html>

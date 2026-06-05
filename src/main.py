@@ -31,8 +31,10 @@ log = get_logger()
 
 
 def cmd_dashboard(args) -> int:
-    from dashboard.app import run_dashboard
-    run_dashboard(host=args.host, port=args.port, debug=args.debug)
+    import uvicorn
+    from app import app
+    print(f"Launching Zero-Lag Scalper Dashboard on http://{args.host}:{args.port}")
+    uvicorn.run(app, host=args.host, port=args.port)
     return 0
 
 
