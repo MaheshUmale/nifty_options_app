@@ -175,12 +175,24 @@ class UpstoxLiveSource:
             try:
                 # Request LTP for all configured instrument keys.
                 resp = self.client.get_market_quote_ltp(self.instrument_keys)
-                # To this (extracting status and data keys from your dictionary):
-                print(f"Market quote response: status={resp.get('status')} body={str(resp.get('data'))[:200]}...")
-
-
                 
+                if not isinstance(resp, dict):
+                    log.error("Unexpected response type from get_market_quote_ltp: {}", type(resp))
+                    time.sleep(self.poll_interval)
+                    continue
+
+                status = resp.get("status")
                 data = resp.get("data", {})
+
+                if status != "success":
+                    log.error("Upstox API error (LTP): status={} body={}", status, resp.get("errors") or resp)
+                    time.sleep(self.poll_interval)
+                    continue
+
+                if not data:
+                    log.warning("Upstox API returned success but empty data for keys: {}", self.instrument_keys)
+                    time.sleep(self.poll_interval)
+                    continue
 
                 # Determine spot price using the first instrument key.
                 spot: float | None = None
@@ -188,17 +200,27 @@ class UpstoxLiveSource:
                 if first_key in data:
                     spot = data[first_key].get("last_price")
 
-                if resp.get("status") == "success" and first_key:
-                    # Fetch Option Chain for the first instrument key.
-                    from datetime import datetime, timedelta
+                if first_key:
+                    # Dynamically find the nearest (current) expiry date
+                    contracts_resp = self.client.get_option_contracts(first_key)
+                    current_expiry = None
+                    if contracts_resp.get("status") == "success" and contracts_resp.get("data"):
+                        expiries = sorted(list(set(item["expiry_date"] for item in contracts_resp["data"])))
+                        if expiries:
+                            current_expiry = expiries[0]
+                            log.debug("Current Expiry Detected: {}", current_expiry)
 
-                    today = datetime.now()
-                    days_ahead = 3 - today.weekday()  # Thursday is weekday 3
-                    if days_ahead < 0:
-                        days_ahead += 7
-                    next_thursday = (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+                    if not current_expiry:
+                        # Fallback to manual calculation if API fails
+                        from datetime import datetime, timedelta
+                        today = datetime.now()
+                        days_ahead = 3 - today.weekday()
+                        if days_ahead < 0:
+                            days_ahead += 7
+                        current_expiry = (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+                        log.warning("Option contracts API failed or returned no expiries; using fallback expiry: {}", current_expiry)
 
-                    chain_resp = self.client.get_option_chain(first_key, next_thursday)
+                    chain_resp = self.client.get_option_chain(first_key, current_expiry)
                     if chain_resp.get("status") == "success":
                         underlying_name = (
                             first_key.split("|", 1)[1]
@@ -208,7 +230,7 @@ class UpstoxLiveSource:
                         df = self._transform_chain(
                             chain_resp["data"],
                             spot=spot,
-                            expiry_date=next_thursday,
+                            expiry_date=current_expiry,
                             underlying_name=underlying_name,
                         )
                         self.queue.put(df)

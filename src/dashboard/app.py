@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import traceback
 from datetime import timedelta
 
 import dash
@@ -49,7 +50,8 @@ def make_layout() -> html.Div:
                                         html.Small(id="kpi-spot-time", className="text-muted"),
                                     ]
                                 )
-                            ]
+                            ],
+                            style={"border": "2px solid #007bff", "backgroundColor": "#f8f9fa"}
                         ),
                         width=3,
                     ),
@@ -59,11 +61,12 @@ def make_layout() -> html.Div:
                                 dbc.CardBody(
                                     [
                                         html.H6("Decision", className="text-muted"),
-                                        html.H3(id="kpi-decision", children="—"),
+                                        html.H3(id="kpi-decision-val", children="—"),
                                         html.Small(id="kpi-conf", className="text-muted"),
                                     ]
                                 )
-                            ]
+                            ],
+                            style={"border": "2px solid #28a745", "backgroundColor": "#f8f9fa"}
                         ),
                         width=3,
                     ),
@@ -77,7 +80,8 @@ def make_layout() -> html.Div:
                                         html.Small(id="kpi-pcr-regime", className="text-muted"),
                                     ]
                                 )
-                            ]
+                            ],
+                            style={"border": "2px solid #17a2b8", "backgroundColor": "#f8f9fa"}
                         ),
                         width=3,
                     ),
@@ -91,7 +95,8 @@ def make_layout() -> html.Div:
                                         html.Small(id="kpi-gex-regime", className="text-muted"),
                                     ]
                                 )
-                            ]
+                            ],
+                            style={"border": "2px solid #ffc107", "backgroundColor": "#f8f9fa"}
                         ),
                         width=3,
                     ),
@@ -101,15 +106,15 @@ def make_layout() -> html.Div:
             # Charts row 1
             dbc.Row(
                 [
-                    dbc.Col(dcc.Graph(id="chart-pcr"), width=6),
-                    dbc.Col(dcc.Graph(id="chart-iv"), width=6),
+                    dbc.Col(dcc.Graph(id="chart-pcr", style={"border": "1px solid #ddd"}), width=6),
+                    dbc.Col(dcc.Graph(id="chart-iv", style={"border": "1px solid #ddd"}), width=6),
                 ]
             ),
             # Charts row 2
             dbc.Row(
                 [
-                    dbc.Col(dcc.Graph(id="chart-gex"), width=6),
-                    dbc.Col(dcc.Graph(id="chart-vwap"), width=6),
+                    dbc.Col(dcc.Graph(id="chart-gex", style={"border": "1px solid #ddd"}), width=6),
+                    dbc.Col(dcc.Graph(id="chart-vwap", style={"border": "1px solid #ddd"}), width=6),
                 ]
             ),
             # Sub-signals & reasons
@@ -156,7 +161,7 @@ def build_app(orchestrator: SignalOrchestrator, order_mgr: OrderManager) -> dash
         [
             Output("kpi-spot", "children"),
             Output("kpi-spot-time", "children"),
-            Output("kpi-decision", "children"),
+            Output("kpi-decision-val", "children"),
             Output("kpi-conf", "children"),
             Output("kpi-pcr", "children"),
             Output("kpi-pcr-regime", "children"),
@@ -172,93 +177,105 @@ def build_app(orchestrator: SignalOrchestrator, order_mgr: OrderManager) -> dash
         [Input("interval", "n_intervals")],
     )
     def update_dashboard(n):
-        history = orchestrator.history
-        if not history:
+        try:
+            history = orchestrator.history
+            if not history:
+                empty = _empty_fig()
+                return (
+                    "—", "—", "—", "—", "—", "—", "—", "—",
+                    empty, empty, empty, empty, "No data yet", "Waiting for ticks…"
+                )
+            latest = history[-1]
+
+            # KPI cards
+            spot_kpi = f"₹{latest.spot:,.2f}"
+            spot_time = pd.Timestamp(latest.timestamp).strftime("%H:%M:%S")
+            decision = latest.decision
+            decision_color = {"GO": "success", "NO-GO": "danger", "HOLD": "secondary"}.get(decision, "secondary")
+            conf = f"conf {latest.confidence:.2f}"
+            pcr_kpi = f"{latest.pcr:.2f}"
+            gex_kpi = f"₹{latest.net_gex/1e7:.2f} Cr"
+            gex_regime = latest.gex_regime
+
+            # Build figures
+            df = pd.DataFrame([s.to_dict() for s in history])
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+            df = df.sort_values("timestamp")
+
+            pcr_fig = _pcr_figure(df)
+            iv_fig = _iv_figure(df)
+            gex_fig = _gex_figure(df)
+            vwap_fig = _vwap_figure(df, latest)
+
+            # Sub-signals
+            sub_signals = dbc.ListGroup(
+                [
+                    dbc.ListGroupItem(
+                        [
+                            html.Strong("Vol-OI Nexus: "),
+                            dbc.Badge(latest.sub_vol_oi, color=_signal_color(latest.sub_vol_oi)),
+                        ]
+                    ),
+                    dbc.ListGroupItem(
+                        [
+                            html.Strong("Gamma Hedge: "),
+                            dbc.Badge(latest.sub_gamma, color=_signal_color(latest.sub_gamma)),
+                        ]
+                    ),
+                    dbc.ListGroupItem(
+                        [
+                            html.Strong("Lead-Lag: "),
+                            dbc.Badge(latest.sub_leadlag, color=_signal_color(latest.sub_leadlag)),
+                        ]
+                    ),
+                    dbc.ListGroupItem(
+                        [
+                            html.Strong("No-Trade Trap: "),
+                            dbc.Badge(latest.sub_no_trade, color=_signal_color(latest.sub_no_trade)),
+                        ]
+                    ),
+                    dbc.ListGroupItem(
+                        [
+                            html.Strong("Momentum Index: "),
+                            f"{latest.momentum_index:+.3f}",
+                        ]
+                    ),
+                ]
+            )
+
+            # Decision card
+            decision_card = html.Div(
+                [
+                    html.H4(
+                        [
+                            "Decision: ",
+                            dbc.Badge(latest.decision, color=decision_color, className="ms-2"),
+                        ]
+                    ),
+                    html.P(f"Suggested: {latest.suggested_side} @ {latest.suggested_strike}", className="mb-1"),
+                    html.Hr(),
+                    html.Ul([html.Li(r) for r in latest.decision_reasons]),
+                    html.Hr(),
+                    html.H6("Positions"),
+                    html.Pre(json.dumps(order_mgr.summary(), indent=2)),
+                ]
+            )
+
+            return (
+                spot_kpi, spot_time, decision, conf, pcr_kpi, latest.pcr_regime, gex_kpi, gex_regime,
+                pcr_fig, iv_fig, gex_fig, vwap_fig, sub_signals, decision_card,
+            )
+        except Exception as e:
+            log.exception("Dashboard update error: {}", e)
+            err_msg = html.Div([
+                html.P(f"Error: {str(e)}", className="text-danger"),
+                html.Pre(traceback.format_exc(), style={"fontSize": "10px"})
+            ])
             empty = _empty_fig()
             return (
-                "—", "—", "—", "—", "—", "—", "—", "—",
-                empty, empty, empty, empty, "No data yet", "Waiting for ticks…"
+                "ERR", "ERR", "ERR", "ERR", "ERR", "ERR", "ERR", "ERR",
+                empty, empty, empty, empty, err_msg, err_msg
             )
-        latest = history[-1]
-
-        # KPI cards
-        spot_kpi = f"₹{latest.spot:,.2f}"
-        spot_time = pd.Timestamp(latest.timestamp).strftime("%H:%M:%S")
-        decision = latest.decision
-        decision_color = {"GO": "success", "NO-GO": "danger", "HOLD": "secondary"}.get(decision, "secondary")
-        conf = f"conf {latest.confidence:.2f}"
-        pcr_kpi = f"{latest.pcr:.2f}"
-        gex_kpi = f"₹{latest.net_gex/1e7:.2f} Cr"
-        gex_regime = latest.gex_regime
-
-        # Build figures
-        df = pd.DataFrame([s.to_dict() for s in history])
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df = df.sort_values("timestamp")
-
-        pcr_fig = _pcr_figure(df)
-        iv_fig = _iv_figure(df)
-        gex_fig = _gex_figure(df)
-        vwap_fig = _vwap_figure(df, latest)
-
-        # Sub-signals
-        sub_signals = dbc.ListGroup(
-            [
-                dbc.ListGroupItem(
-                    [
-                        html.Strong("Vol-OI Nexus: "),
-                        dbc.Badge(latest.sub_vol_oi, color=_signal_color(latest.sub_vol_oi)),
-                    ]
-                ),
-                dbc.ListGroupItem(
-                    [
-                        html.Strong("Gamma Hedge: "),
-                        dbc.Badge(latest.sub_gamma, color=_signal_color(latest.sub_gamma)),
-                    ]
-                ),
-                dbc.ListGroupItem(
-                    [
-                        html.Strong("Lead-Lag: "),
-                        dbc.Badge(latest.sub_leadlag, color=_signal_color(latest.sub_leadlag)),
-                    ]
-                ),
-                dbc.ListGroupItem(
-                    [
-                        html.Strong("No-Trade Trap: "),
-                        dbc.Badge(latest.sub_no_trade, color=_signal_color(latest.sub_no_trade)),
-                    ]
-                ),
-                dbc.ListGroupItem(
-                    [
-                        html.Strong("Momentum Index: "),
-                        f"{latest.momentum_index:+.3f}",
-                    ]
-                ),
-            ]
-        )
-
-        # Decision card
-        decision_card = html.Div(
-            [
-                html.H4(
-                    [
-                        "Decision: ",
-                        dbc.Badge(latest.decision, color=decision_color, className="ms-2"),
-                    ]
-                ),
-                html.P(f"Suggested: {latest.suggested_side} @ {latest.suggested_strike}", className="mb-1"),
-                html.Hr(),
-                html.Ul([html.Li(r) for r in latest.decision_reasons]),
-                html.Hr(),
-                html.H6("Positions"),
-                html.Pre(json.dumps(order_mgr.summary(), indent=2)),
-            ]
-        )
-
-        return (
-            spot_kpi, spot_time, decision, conf, pcr_kpi, latest.pcr_regime, gex_kpi, gex_regime,
-            pcr_fig, iv_fig, gex_fig, vwap_fig, sub_signals, decision_card,
-        )
 
     return app
 
@@ -388,7 +405,8 @@ def run_dashboard(host: str = "127.0.0.1", port: int = 8050, debug: bool = False
 
     app = build_app(orch, order_mgr)
     log.info("Starting dashboard on http://{}:{}", host, port)
-    app.run(host=host, port=port, debug=debug)
+    # Force debug=True for debugging session as requested
+    app.run(host=host, port=port, debug=True)
 
 
 if __name__ == "__main__":
