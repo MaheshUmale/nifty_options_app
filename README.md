@@ -57,12 +57,12 @@ cp .env.example .env       # fill in Upstox keys
 
 ### 2. Smoke test
 ```bash
-python -m src.main smoke
+python3 src/main.py smoke
 ```
 
 ### 3. Run the live dashboard
 ```bash
-python -m src.main dashboard --port 8000
+python3 src/main.py dashboard --port 8000
 ```
 Opens the Zero-Lag Scalper UI at <http://127.0.0.1:8000>.
 
@@ -77,7 +77,7 @@ The system is decoupled into five operational layers for maximum performance:
 
 ## 🧪 Testing
 ```bash
-python -m pytest tests/ -v
+PYTHONPATH=src python3 -m pytest tests/ -v
 ```
 
 ## 🔌 AI Integration (MCP)
