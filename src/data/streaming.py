@@ -272,8 +272,11 @@ class UpstoxLiveSource:
         for item in data:
             strike = item.get("strike_price")
 
-            ce = item.get("call_options", {}).get("market_data", {})
-            pe = item.get("put_options", {}).get("market_data", {})
+            ce_market = item.get("call_options", {}).get("market_data", {})
+            ce_greeks = item.get("call_options", {}).get("option_greeks", {})
+
+            pe_market = item.get("put_options", {}).get("market_data", {})
+            pe_greeks = item.get("put_options", {}).get("option_greeks", {})
 
             # Resolve Upstox identifiers (token/key + tradingsymbol) per strike+CE/PE
             ce_rec = None
@@ -307,29 +310,30 @@ class UpstoxLiveSource:
                 "tradingsymbol_ce": (ce_rec or {}).get("tradingsymbol"),
                 "instrument_key_ce": (ce_rec or {}).get("instrument_key"),
                 "instrument_token_ce": (ce_rec or {}).get("instrument_token"),
-                "ce_ltp": ce.get("ltp", 0),
-                "ce_volume": ce.get("volume", 0),
-                "ce_oi": ce.get("oi", 0),
+                "ce_ltp": ce_market.get("ltp", 0),
+                "ce_volume": ce_market.get("volume", 0),
+                "ce_oi": ce_market.get("oi", 0),
 
                 # PE identifiers + market data
                 "tradingsymbol_pe": (pe_rec or {}).get("tradingsymbol"),
                 "instrument_key_pe": (pe_rec or {}).get("instrument_key"),
                 "instrument_token_pe": (pe_rec or {}).get("instrument_token"),
-                "pe_ltp": pe.get("ltp", 0),
-                "pe_volume": pe.get("volume", 0),
-                "pe_oi": pe.get("oi", 0),
+                "pe_ltp": pe_market.get("ltp", 0),
+                "pe_volume": pe_market.get("volume", 0),
+                "pe_oi": pe_market.get("oi", 0),
 
-                # NOTE: IV/Greeks still placeholders until feature pipeline is upgraded
-                "ce_iv": 0.15,
-                "ce_delta": 0.5,
-                "ce_gamma": 0.001,
-                "ce_theta": -1,
-                "ce_vega": 0.1,
-                "pe_iv": 0.15,
-                "pe_delta": -0.5,
-                "pe_gamma": 0.001,
-                "pe_theta": -1,
-                "pe_vega": 0.1,
+                # Real Greeks and IV from Upstox API
+                "ce_iv": ce_greeks.get("iv", 0) / 100.0 if ce_greeks.get("iv") else 0.15,
+                "ce_delta": ce_greeks.get("delta", 0.5),
+                "ce_gamma": ce_greeks.get("gamma", 0.001),
+                "ce_theta": ce_greeks.get("theta", -1),
+                "ce_vega": ce_greeks.get("vega", 0.1),
+
+                "pe_iv": pe_greeks.get("iv", 0) / 100.0 if pe_greeks.get("iv") else 0.15,
+                "pe_delta": pe_greeks.get("delta", -0.5),
+                "pe_gamma": pe_greeks.get("gamma", 0.001),
+                "pe_theta": pe_greeks.get("theta", -1),
+                "pe_vega": pe_greeks.get("vega", 0.1),
             })
 
         return pd.DataFrame(rows)

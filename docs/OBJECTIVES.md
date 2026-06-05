@@ -29,8 +29,9 @@ The system treats volatility, order flow, and market-maker positioning as a sync
 
 The system is decoupled into three layers to ensure low latency and prevent race conditions.
 
-### 2.1 Ingestion Layer
-- **Protocols**: Upstox REST V2 and WebSocket V3 (Protobuf).
+### 2.1 Ingestion & Storage Layer
+- **Protocols**: Upstox REST V2 (polling).
+- **Storage**: Real-time snapshots are persistently stored in **DuckDB** (`data/market_data.duckdb`). This allows for high-fidelity backtesting and replay of real market conditions.
 - **Symbol Engine**: Bidirectional hash map linking exchange strings (e.g., `NIFTY26JUN2524000CE`) to Upstox `instrument_key` tokens.
 
 ### 2.2 Feature & Signal Engine

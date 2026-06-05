@@ -82,20 +82,16 @@ move the signal engine to a separate process pinned to a CPU core.
 
 | Layer | Tech | Retention | Access |
 |-------|------|-----------|--------|
+| Persistent | DuckDB | ∞ | Backtest / Replay |
 | Hot (live) | In-memory pandas | 1 day | O(1) feature lookups |
-| Warm | Parquet (per-day files) | 30 days | Sub-second columnar scans |
-| Cold | S3 / GCS (partitioned by year/month) | ∞ | Bulk backtest reads |
+
+Market data snapshots (option chains) are automatically persisted to `data/market_data.duckdb` by the `UpstoxLiveSource` using the `MarketDataStore` class. This enables historical analysis and backtesting on real-world polled data.
 
 Storage layout:
 ```
 data/
-├── live/                   # today
-│   ├── ticks_20260604.parquet
-│   ├── features_20260604.parquet
-│   └── signals_20260604.parquet
-├── warm/                   # last 30 days
-└── cold/
-    └── year=2026/month=06/day=04/ticks.parquet
+├── market_data.duckdb      # DuckDB database with all snapshots
+└── backtest_equity_*.csv   # Generated backtest results
 ```
 
 ## Failure Modes & Fallbacks
