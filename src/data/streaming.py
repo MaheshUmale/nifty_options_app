@@ -197,15 +197,27 @@ class UpstoxLiveSource:
                 # Determine spot price using the first instrument key.
                 spot: float | None = None
                 first_key = self.instrument_keys[0]
+
+                # Upstox V3 API might return keys with ':' instead of '|' or vice versa
+                normalized_first_key = first_key.replace("|", ":")
+
                 if first_key in data:
                     spot = data[first_key].get("last_price")
+                elif normalized_first_key in data:
+                    spot = data[normalized_first_key].get("last_price")
+                else:
+                    # Fallback: search for any key that contains the first_key or vice versa
+                    for k, v in data.items():
+                        if first_key in k or k in first_key:
+                            spot = v.get("last_price")
+                            break
 
                 if first_key:
                     # Dynamically find the nearest (current) expiry date
                     contracts_resp = self.client.get_option_contracts(first_key)
                     current_expiry = None
                     if contracts_resp.get("status") == "success" and contracts_resp.get("data"):
-                        expiries = sorted(list(set(item["expiry_date"] for item in contracts_resp["data"])))
+                        expiries = sorted(list(set(item.get("expiry") for item in contracts_resp["data"] if item.get("expiry"))))
                         if expiries:
                             current_expiry = expiries[0]
                             log.debug("Current Expiry Detected: {}", current_expiry)
