@@ -25,8 +25,8 @@ import requests
 from dotenv import load_dotenv, set_key
 
 # Updated import to reflect correct package path after fixing sys.path handling.
-from src.utils.logger import get_logger
-from src.config import HARDCODED_UPSTOX_ACCESS_TOKEN, get_upstox_access_token
+from utils.logger import get_logger
+from config import HARDCODED_UPSTOX_ACCESS_TOKEN, get_upstox_access_token
 
 log = get_logger()
 
@@ -247,7 +247,18 @@ class UpstoxClient:
         print(f"Option chain response: status={resp.status_code} body={resp.text[:200]}...")
         # Return parsed JSON response.
         return resp.json()
-             
+
+    def get_option_contracts(self, instrument_key: str) -> dict[str, Any]:
+        """Fetch all active option contracts (expiries) for a given underlying."""
+        url = f"{self.BASE_URL}/v2/option/contract"
+        params = {"instrument_key": instrument_key}
+        headers = self._auth_headers()
+
+        resp = requests.get(url, headers=headers, params=params, timeout=30)
+        if resp.status_code != 200:
+            log.error("Failed to fetch option contracts: status={} body={}", resp.status_code, resp.text)
+            return {"status": "error", "errors": [resp.text]}
+        return resp.json()
 
 
 # -----------------------------
