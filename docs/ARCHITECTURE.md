@@ -17,14 +17,26 @@
                 ▼
    ┌───────────────────────────────────┐
    │        FastAPI Application        │
-   │  (Cache Update & WebSocket Bcast) │
+   │ (Normalizer & WebSocket Broadcast) │
    └────────────┬─────────────┬────────┘
                 │             │
                 ▼             ▼
    ┌──────────────────┐  ┌──────────────────┐
-   │ Analytical Store │  │ Zero-Lag UI      │
-   │ (DuckDB Buffer)  │  │ (TradingView)    │
-   └──────────────────┘  └──────────────────┘
+   │ Analytical Store │  │ Signal Engine    │
+   │ (DuckDB Buffer)  │  │ (Orchestrator)   │
+   └──────────────────┘  └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │ Risk & Execution │
+                         │ (Order Manager)  │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │ Zero-Lag UI      │
+                         │ (TradingView)    │
+                         └──────────────────┘
 ```
 
 ## Operational Layers
