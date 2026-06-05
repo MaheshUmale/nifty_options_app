@@ -12,6 +12,7 @@ import os
 
 from utils.logger import get_logger
 from data.upstox_client import make_client_from_env, resolve_option_instrument_master
+from data.store import MarketDataStore
 import time
 
 log = get_logger()
@@ -103,6 +104,7 @@ class UpstoxLiveSource:
         self.poll_interval = poll_interval_sec
         self.queue = Queue()
         self.client = make_client_from_env()
+        self.store = MarketDataStore()
         # Load instrument keys from environmentking fallback to a single default.
         self.instrument_keys: list[str] = self._load_instrument_keys()
 
@@ -197,17 +199,27 @@ class UpstoxLiveSource:
                 # Determine spot price using the first instrument key.
                 spot: float | None = None
                 first_key = self.instrument_keys[0]
+
+                # Upstox V3 API might return keys with ':' instead of '|' or vice versa
+                normalized_first_key = first_key.replace("|", ":")
+
                 if first_key in data:
                     spot = data[first_key].get("last_price")
-                elif first_key.replace("|", ":") in data:
-                    spot = data[first_key.replace("|", ":")].get("last_price")
+                elif normalized_first_key in data:
+                    spot = data[normalized_first_key].get("last_price")
+                else:
+                    # Fallback: search for any key that contains the first_key or vice versa
+                    for k, v in data.items():
+                        if first_key in k or k in first_key:
+                            spot = v.get("last_price")
+                            break
 
                 if first_key:
                     # Dynamically find the nearest (current) expiry date
                     contracts_resp = self.client.get_option_contracts(first_key)
                     current_expiry = None
                     if contracts_resp.get("status") == "success" and contracts_resp.get("data"):
-                        expiries = sorted(list(set(item.get("expiry") or item.get("expiry_date") for item in contracts_resp["data"] if item.get("expiry") or item.get("expiry_date"))))
+                        expiries = sorted(list(set(item.get("expiry") for item in contracts_resp["data"] if item.get("expiry"))))
                         if expiries:
                             current_expiry = expiries[0]
                             log.debug("Current Expiry Detected: {}", current_expiry)
@@ -235,6 +247,8 @@ class UpstoxLiveSource:
                             expiry_date=current_expiry,
                             underlying_name=underlying_name,
                         )
+                        # Store data persistently for future backtests/replay
+                        self.store.save_snapshot(df)
                         self.queue.put(df)
                     else:
                         log.error("Live Option Chain failed: {}", chain_resp.get("errors"))

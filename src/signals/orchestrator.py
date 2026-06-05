@@ -93,12 +93,18 @@ class SignalOrchestrator:
 
                 spot = 0.0
                 if "underlying_spot" in chain.columns and len(chain) > 0:
-                    spot = float(chain["underlying_spot"].iloc[0])
+                    val = chain["underlying_spot"].iloc[0]
+                    if val is not None:
+                        spot = float(val)
 
                 # If underlying_spot is missing or 0, fallback to spot column
                 if spot == 0 and "spot" in chain.columns and len(chain) > 0:
-                    spot = float(chain["spot"].iloc[0])
+                    val = chain["spot"].iloc[0]
+                    if val is not None:
+                        spot = float(val)
+
                 if spot == 0:
+                    log.warning("No spot price found in chain snapshot; skipping tick.")
                     continue
                 st = self.engine.on_tick(chain=chain, spot=spot)
                 self.latest = st
