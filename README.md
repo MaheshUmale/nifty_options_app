@@ -57,12 +57,12 @@ cp .env.example .env       # fill in Upstox keys
 
 ### 2. Smoke test
 ```bash
-python -m main smoke
+python -m src.main smoke
 ```
 
 ### 3. Run the live dashboard
 ```bash
-python -m main dashboard --port 8000
+python -m src.main dashboard --port 8000
 ```
 Opens the Zero-Lag Scalper UI at <http://127.0.0.1:8000>.
 

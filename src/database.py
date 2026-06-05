@@ -95,10 +95,12 @@ class DuckDBManager:
         try:
             df = pd.DataFrame(data_to_flush)
             schema_cols = ["timestamp", "instrument_key", "ltp", "volume", "bid", "ask", "oi"]
-            cols_to_use = [c for c in schema_cols if c in df.columns]
-            df = df[cols_to_use]
+
+            # Ensure all schema columns exist in the DataFrame, filling missing with None (NULL in DuckDB)
+            df = df.reindex(columns=schema_cols)
 
             if self._con:
+                # Use the connection to insert. DuckDB handles Pandas DataFrames directly.
                 self._con.execute("INSERT INTO ticks SELECT * FROM df")
                 logger.debug(f"Flushed {len(data_to_flush)} ticks to DuckDB.")
             else:

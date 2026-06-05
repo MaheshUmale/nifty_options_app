@@ -8,85 +8,111 @@
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <style>
         body { background-color: #111827; color: #f3f4f6; }
-        .chart-container { height: 500px; width: 100%; }
+        .chart-container { height: 400px; width: 100%; }
+        .tick-stream { height: 150px; overflow-y: auto; }
+        .signal-card { border-left-width: 4px; }
     </style>
 </head>
 <body class="font-sans antialiased">
     <div class="container mx-auto p-4">
         <header class="flex justify-between items-center mb-6">
             <h1 class="text-3xl font-bold text-blue-500">NIFTY Zero-Lag Scalper</h1>
-            <div id="connection-status" class="px-3 py-1 rounded-full text-sm bg-red-900 text-red-200">Disconnected</div>
+            <div class="flex items-center gap-4">
+                <div id="last-updated" class="text-sm text-gray-400"></div>
+                <div id="connection-status" class="px-3 py-1 rounded-full text-sm bg-red-900 text-red-200">Disconnected</div>
+            </div>
         </header>
 
+        <!-- KPI Row -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
             <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-blue-500">
                 <h3 class="text-gray-400 text-sm uppercase">NIFTY Spot</h3>
                 <div id="spot-price" class="text-3xl font-mono font-bold">—</div>
             </div>
             <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-green-500">
-                <h3 class="text-gray-400 text-sm uppercase">24h Change</h3>
-                <div id="price-change" class="text-3xl font-mono font-bold">—</div>
+                <h3 class="text-gray-400 text-sm uppercase">Decision</h3>
+                <div id="signal-decision" class="text-3xl font-mono font-bold">—</div>
+                <div id="signal-confidence" class="text-sm text-gray-400"></div>
             </div>
             <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-purple-500">
-                <h3 class="text-gray-400 text-sm uppercase">Volume</h3>
-                <div id="volume" class="text-3xl font-mono font-bold">—</div>
+                <h3 class="text-gray-400 text-sm uppercase">PCR</h3>
+                <div id="pcr-val" class="text-3xl font-mono font-bold">—</div>
+                <div id="pcr-regime" class="text-sm text-gray-400"></div>
             </div>
             <div class="bg-gray-800 p-4 rounded-lg shadow-lg border-l-4 border-yellow-500">
-                <h3 class="text-gray-400 text-sm uppercase">OI</h3>
-                <div id="oi" class="text-3xl font-mono font-bold">—</div>
+                <h3 class="text-gray-400 text-sm uppercase">Net GEX</h3>
+                <div id="gex-val" class="text-3xl font-mono font-bold">—</div>
+                <div id="gex-regime" class="text-sm text-gray-400"></div>
             </div>
         </div>
 
-        <div class="bg-gray-800 p-4 rounded-lg shadow-lg mb-6">
-            <div id="chart" class="chart-container"></div>
-        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Main Chart Area -->
+            <div class="lg:col-span-2 space-y-6">
+                <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+                    <div id="chart" class="chart-container"></div>
+                </div>
 
-        <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
-            <h3 class="text-xl font-bold mb-4">Live Tick Stream</h3>
-            <div id="tick-stream" class="font-mono text-xs h-32 overflow-y-auto bg-black p-2 rounded border border-gray-700">
-                <!-- Ticks will appear here -->
+                <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+                    <h3 class="text-xl font-bold mb-4 text-blue-400">Sub-Signals</h3>
+                    <div id="sub-signals" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <!-- Sub-signals will appear here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="space-y-6">
+                <!-- Decision Analysis -->
+                <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+                    <h3 class="text-xl font-bold mb-4 text-blue-400">Decision Analysis</h3>
+                    <div id="decision-reasons" class="text-sm space-y-2">
+                        <p class="text-gray-500 italic">Waiting for signal...</p>
+                    </div>
+                </div>
+
+                <!-- Position Summary -->
+                <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+                    <h3 class="text-xl font-bold mb-4 text-blue-400">Positions</h3>
+                    <div id="position-summary" class="text-sm font-mono whitespace-pre bg-black p-3 rounded border border-gray-700">
+                        No active positions
+                    </div>
+                </div>
+
+                <!-- Tick Stream -->
+                <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+                    <h3 class="text-xl font-bold mb-4 text-blue-400">Live Ticks</h3>
+                    <div id="tick-stream" class="tick-stream font-mono text-xs bg-black p-2 rounded border border-gray-700">
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
-        const spotPriceEl = document.getElementById('spot-price');
-        const priceChangeEl = document.getElementById('price-change');
-        const volumeEl = document.getElementById('volume');
-        const oiEl = document.getElementById('oi');
         const statusEl = document.getElementById('connection-status');
+        const spotPriceEl = document.getElementById('spot-price');
+        const decisionEl = document.getElementById('signal-decision');
+        const confEl = document.getElementById('signal-confidence');
+        const pcrEl = document.getElementById('pcr-val');
+        const pcrRegimeEl = document.getElementById('pcr-regime');
+        const gexEl = document.getElementById('gex-val');
+        const gexRegimeEl = document.getElementById('gex-regime');
+        const subSignalsEl = document.getElementById('sub-signals');
+        const reasonsEl = document.getElementById('decision-reasons');
+        const positionsEl = document.getElementById('position-summary');
         const tickStreamEl = document.getElementById('tick-stream');
+        const lastUpdatedEl = document.getElementById('last-updated');
 
-        // Initialize TradingView Lightweight Chart
-        const chartElement = document.getElementById('chart');
-        const chart = LightweightCharts.createChart(chartElement, {
-            layout: {
-                backgroundColor: '#111827',
-                textColor: '#d1d5db',
-            },
-            grid: {
-                vertLines: { color: '#1f2937' },
-                horzLines: { color: '#1f2937' },
-            },
-            crosshair: {
-                mode: LightweightCharts.CrosshairMode.Normal,
-            },
-            rightPriceScale: {
-                borderColor: '#4b5563',
-            },
-            timeScale: {
-                borderColor: '#4b5563',
-                timeVisible: true,
-                secondsVisible: true,
-            },
+        // Initialize Chart
+        const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+            layout: { backgroundColor: '#111827', textColor: '#d1d5db' },
+            grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
+            timeScale: { timeVisible: true, secondsVisible: true },
         });
 
-        const areaSeries = chart.addLineSeries({
-            color: '#3b82f6',
-            lineWidth: 2,
-        });
+        const lineSeries = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2 });
 
-        // WebSocket connection
         let socket;
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -94,62 +120,82 @@
 
             socket.onopen = () => {
                 statusEl.innerText = 'Connected';
-                statusEl.classList.replace('bg-red-900', 'bg-green-900');
-                statusEl.classList.replace('text-red-200', 'text-green-200');
-                console.log('WebSocket connected');
+                statusEl.className = 'px-3 py-1 rounded-full text-sm bg-green-900 text-green-200';
             };
 
             socket.onmessage = (event) => {
-                const tick = JSON.parse(event.data);
-                updateUI(tick);
+                const payload = JSON.parse(event.data);
+                if (payload.type === 'tick') handleTick(payload.data);
+                if (payload.type === 'signal') handleSignal(payload);
             };
 
             socket.onclose = () => {
                 statusEl.innerText = 'Disconnected';
-                statusEl.classList.replace('bg-green-900', 'bg-red-900');
-                statusEl.classList.replace('text-green-200', 'text-red-200');
-                console.log('WebSocket disconnected. Reconnecting...');
+                statusEl.className = 'px-3 py-1 rounded-full text-sm bg-red-900 text-red-200';
                 setTimeout(connect, 3000);
-            };
-
-            socket.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                socket.close();
             };
         }
 
-        function updateUI(tick) {
-            // Only update if it's the main index for now
-            if (tick.instrument_key === "NSE_INDEX|Nifty 50" || tick.instrument_key === "NSE_INDEX:Nifty 50") {
-                const ltp = tick.ltp;
-                spotPriceEl.innerText = `₹${ltp.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
-                volumeEl.innerText = tick.volume ? tick.volume.toLocaleString('en-IN') : '—';
-                oiEl.innerText = tick.oi ? tick.oi.toLocaleString('en-IN') : '—';
-
-                // Update chart
-                areaSeries.update({
-                    time: Math.floor(Date.now() / 1000),
-                    value: ltp
-                });
+        function handleTick(tick) {
+            if (tick.instrument_key === "NSE_INDEX|Nifty 50") {
+                spotPriceEl.innerText = `₹${tick.ltp.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+                lineSeries.update({ time: Math.floor(Date.now() / 1000), value: tick.ltp });
             }
 
-            // Append to tick stream
-            const tickLine = document.createElement('div');
-            tickLine.innerText = `[${new Date().toLocaleTimeString()}] ${tick.instrument_key}: ${tick.ltp}`;
-            tickStreamEl.prepend(tickLine);
-            if (tickStreamEl.childNodes.length > 50) {
-                tickStreamEl.removeChild(tickStreamEl.lastChild);
+            const line = document.createElement('div');
+            line.className = 'border-b border-gray-900 py-1';
+            line.innerText = `[${new Date().toLocaleTimeString()}] ${tick.instrument_key}: ${tick.ltp}`;
+            tickStreamEl.prepend(line);
+            if (tickStreamEl.childNodes.length > 50) tickStreamEl.removeChild(tickStreamEl.lastChild);
+
+            lastUpdatedEl.innerText = `Last tick: ${new Date().toLocaleTimeString()}`;
+        }
+
+        function handleSignal(payload) {
+            const st = payload.data;
+            decisionEl.innerText = st.decision;
+            decisionEl.className = `text-3xl font-mono font-bold ${st.decision === 'GO' ? 'text-green-500' : st.decision === 'NO-GO' ? 'text-red-500' : 'text-gray-400'}`;
+            confEl.innerText = `Confidence: ${(st.confidence * 100).toFixed(0)}%`;
+
+            pcrEl.innerText = st.pcr.toFixed(2);
+            pcrRegimeEl.innerText = st.pcr_regime;
+
+            gexEl.innerText = `₹${(st.net_gex / 1e7).toFixed(2)} Cr`;
+            gexRegimeEl.innerText = st.gex_regime;
+
+            // Sub-signals
+            const subs = [
+                { name: 'Vol-OI', val: st.sub_vol_oi },
+                { name: 'Gamma', val: st.sub_gamma },
+                { name: 'LeadLag', val: st.sub_leadlag },
+                { name: 'Trap', val: st.sub_no_trade }
+            ];
+            subSignalsEl.innerHTML = subs.map(s => `
+                <div class="bg-gray-700 p-2 rounded text-center">
+                    <div class="text-xs text-gray-400 uppercase">${s.name}</div>
+                    <div class="text-sm font-bold ${getColorForSignal(s.val)}">${s.val}</div>
+                </div>
+            `).join('');
+
+            // Reasons
+            reasonsEl.innerHTML = st.decision_reasons.map(r => `<div class="flex gap-2"><span class="text-blue-500">•</span> <span>${r}</span></div>`).join('');
+
+            // Positions
+            if (payload.positions) {
+                positionsEl.innerText = JSON.stringify(payload.positions, null, 2);
             }
+        }
+
+        function getColorForSignal(val) {
+            if (val.includes('BUY')) return 'text-green-400';
+            if (val.includes('NO_TRADE')) return 'text-yellow-400';
+            if (val.includes('NO-GO')) return 'text-red-400';
+            return 'text-gray-300';
         }
 
         connect();
-
-        // Handle window resize
         window.addEventListener('resize', () => {
-            chart.applyOptions({
-                width: chartElement.clientWidth,
-                height: chartElement.clientHeight
-            });
+            chart.applyOptions({ width: document.getElementById('chart').clientWidth });
         });
     </script>
 </body>

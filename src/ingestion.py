@@ -71,9 +71,11 @@ class UpstoxWSSource:
             ticks = []
             if isinstance(message, dict) and "data" in message:
                 for key, data in message["data"].items():
+                    # Handle both "NSE_INDEX|Nifty 50" and "NSE_INDEX:Nifty 50" formats
+                    normalized_key = key.replace(":", "|")
                     tick = {
                         "timestamp": self.loop.time(),
-                        "instrument_key": key,
+                        "instrument_key": normalized_key,
                         "ltp": data.get("last_price"),
                         "volume": data.get("volume"),
                         "oi": data.get("oi"),
