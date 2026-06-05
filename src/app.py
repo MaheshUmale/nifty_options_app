@@ -25,6 +25,7 @@ from data.streaming import UpstoxLiveSource, MockWebSocket
 from signals.state import SignalState
 
 import pandas as pd
+import queue
 from data.upstox_client import UpstoxClient
 
 # Global State
@@ -40,7 +41,7 @@ order_manager: OrderManager | None = None
 class WSQueueSource:
     """Mock-like source for SignalOrchestrator that we manually feed with ticks."""
     def __init__(self):
-        self.queue = asyncio.Queue()
+        self.queue = queue.Queue() # Thread-safe Queue
     def start(self): pass
     def stop(self): pass
 
@@ -127,7 +128,10 @@ async def lifespan(app: FastAPI):
     # 5. Background task to feed the Orchestrator periodically from accumulated ticks
     asyncio.create_task(signal_feed_loop(ws_queue_source))
 
-    # 6. Toggle mock generator based on APP_MODE
+    # 6. Start Mark-to-Market (MTM) loop for risk management
+    asyncio.create_task(mtm_loop())
+
+    # 7. Toggle mock generator based on APP_MODE
     if mode == "mock":
         logger.info("Starting mock tick generator (APP_MODE=mock)")
         asyncio.create_task(mock_tick_generator())
@@ -162,6 +166,10 @@ async def handle_new_tick(tick: dict[str, Any]):
     latest_market_cache[instrument] = tick
     virtual_chain_cache[instrument] = tick
 
+    # 1.1 Update Greeks if present in tick
+    if "greeks" in tick and instrument in option_key_to_strike_info:
+        option_key_to_strike_info[instrument]["greeks"] = tick["greeks"]
+
     # 2. Buffer for DuckDB
     db_tick = tick.copy()
     db_tick["timestamp"] = datetime.now()
@@ -175,45 +183,45 @@ async def handle_new_tick(tick: dict[str, Any]):
     await broadcast_payload(payload)
 
 async def signal_feed_loop(source: WSQueueSource):
-    """Accumulates ticks and periodically pushes a DataFrame to the Orchestrator."""
+    """
+    Normalizer / Cache Layer:
+    Accumulates high-frequency ticks into 1-second buckets and
+    pushes a consolidated 'Chain DataFrame' to the Signal Engine.
+    """
     while True:
-        await asyncio.sleep(1.0) # Run signal engine every second
+        await asyncio.sleep(1.0)
 
         if not virtual_chain_cache:
             continue
 
         try:
-            # Build DataFrame from virtual_chain_cache
-            # This logic needs to mirror what SignalOrchestrator expects
             spot_key = "NSE_INDEX|Nifty 50"
-            spot_tick = virtual_chain_cache.get(spot_key)
-            if not spot_tick:
-                # Try normalized key if not found
-                spot_tick = virtual_chain_cache.get(spot_key.replace("|", ":"))
+            spot_tick = virtual_chain_cache.get(spot_key) or virtual_chain_cache.get(spot_key.replace("|", ":"))
 
             if not spot_tick:
                 continue
 
             spot_price = spot_tick["ltp"]
 
-            # Construct chain rows
-            rows = []
-            # We need to group by strike to form the 'chain' DataFrame format
-            strikes = {} # strike -> {ce_data, pe_data}
-
+            strikes = {}
             for key, info in option_key_to_strike_info.items():
                 tick = virtual_chain_cache.get(key)
                 if not tick: continue
 
                 strike = info["strike"]
-                if strike not in strikes: strikes[strike] = {"strike": strike}
+                if strike not in strikes:
+                    strikes[strike] = {
+                        "strike": strike,
+                        "expiry": info["expiry"],
+                        "spot": spot_price
+                    }
 
-                prefix = info["side"].lower() # ce or pe
+                prefix = info["side"].lower()
                 strikes[strike][f"{prefix}_ltp"] = tick["ltp"]
-                strikes[strike][f"{prefix}_volume"] = tick["volume"]
-                strikes[strike][f"{prefix}_oi"] = tick["oi"]
+                strikes[strike][f"{prefix}_volume"] = tick.get("volume", 0)
+                strikes[strike][f"{prefix}_oi"] = tick.get("oi", 0)
 
-                # Add Greeks (static from initial load)
+                # Add Greeks for Feature Engine
                 greeks = info["greeks"]
                 for g_key, g_val in greeks.items():
                     strikes[strike][f"{prefix}_{g_key}"] = g_val
@@ -221,14 +229,29 @@ async def signal_feed_loop(source: WSQueueSource):
             df = pd.DataFrame(list(strikes.values()))
             if df.empty: continue
 
-            df["spot"] = spot_price
             df["timestamp"] = pd.Timestamp.now(tz="Asia/Kolkata")
 
-            # Push to orchestrator queue
-            source.queue.put_nowait(df)
+            # Push to Signal Engine (Orchestrator)
+            source.queue.put(df)
 
         except Exception as e:
-            logger.error(f"Error in signal_feed_loop: {e}")
+            logger.error(f"Error in signal_feed_loop (Normalizer): {e}")
+
+async def mtm_loop():
+    """
+    Risk Governance Layer:
+    Periodically updates unrealized PnL and enforces stop-loss/target exit rules.
+    """
+    while True:
+        await asyncio.sleep(5.0) # 5s MTM cycle
+        if order_manager and order_manager.positions:
+            # Create a simple price lookup from cache for tradingsymbols
+            # Note: order_manager uses tradingsymbol/instrument name
+            price_lookup = {k: v["ltp"] for k, v in latest_market_cache.items()}
+
+            # We also need to map tradingsymbols back to LTP if they differ from instrument_key
+            # For simplicity, we use the instrument_key if that's what's in the cache
+            order_manager.mark_to_market(price_lookup)
 
 async def handle_new_signal(st: SignalState):
     """

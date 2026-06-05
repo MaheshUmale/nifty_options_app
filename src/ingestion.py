@@ -76,10 +76,16 @@ class UpstoxWSSource:
                     tick = {
                         "timestamp": self.loop.time(),
                         "instrument_key": normalized_key,
-                        "ltp": data.get("last_price"),
-                        "volume": data.get("volume"),
+                        "ltp": data.get("last_price") or data.get("ltp"),
+                        "volume": data.get("volume") or data.get("v"),
                         "oi": data.get("oi"),
                     }
+                    # Include any extra fields like Greeks if present in 'full' mode
+                    if "option_greeks" in data:
+                        tick["greeks"] = data["option_greeks"]
+                    elif "og" in data: # Some V3 versions use short keys
+                        tick["greeks"] = data["og"]
+
                     ticks.append(tick)
 
             for tick in ticks:

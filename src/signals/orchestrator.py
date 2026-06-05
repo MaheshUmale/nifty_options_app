@@ -72,10 +72,10 @@ class SignalOrchestrator:
             # Connection Watchdog Check
             if self.order_manager and self.order_manager.live:
                 gap = time.time() - self.last_tick_time
-                # if gap > 5.0 and not getattr(self.order_manager, "degraded_mode", False):
-                #     log.error("CONNECTION WATCHDOG ALERT: Data delivery gap exceeded 5s (elapsed: {:.1f}s)!", gap)
-                #     self.order_manager.degraded_mode = True
-                #     self.order_manager.handle_degraded_mode(self.latest)
+                if gap > 5.0 and not self.order_manager.degraded_mode:
+                    log.error("CONNECTION WATCHDOG ALERT: Data delivery gap exceeded 5s (elapsed: {:.1f}s)!", gap)
+                    self.order_manager.degraded_mode = True
+                    self.order_manager.handle_degraded_mode(self.latest)
 
             try:
                 chain = self.data_source.queue.get(timeout=self.poll_interval)
