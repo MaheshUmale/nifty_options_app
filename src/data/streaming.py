@@ -12,6 +12,7 @@ import os
 
 from utils.logger import get_logger
 from data.upstox_client import make_client_from_env, resolve_option_instrument_master
+from data.store import MarketDataStore
 import time
 
 log = get_logger()
@@ -103,6 +104,7 @@ class UpstoxLiveSource:
         self.poll_interval = poll_interval_sec
         self.queue = Queue()
         self.client = make_client_from_env()
+        self.store = MarketDataStore()
         # Load instrument keys from environmentking fallback to a single default.
         self.instrument_keys: list[str] = self._load_instrument_keys()
 
@@ -245,6 +247,8 @@ class UpstoxLiveSource:
                             expiry_date=current_expiry,
                             underlying_name=underlying_name,
                         )
+                        # Store data persistently for future backtests/replay
+                        self.store.save_snapshot(df)
                         self.queue.put(df)
                     else:
                         log.error("Live Option Chain failed: {}", chain_resp.get("errors"))
