@@ -199,13 +199,15 @@ class UpstoxLiveSource:
                 first_key = self.instrument_keys[0]
                 if first_key in data:
                     spot = data[first_key].get("last_price")
+                elif first_key.replace("|", ":") in data:
+                    spot = data[first_key.replace("|", ":")].get("last_price")
 
                 if first_key:
                     # Dynamically find the nearest (current) expiry date
                     contracts_resp = self.client.get_option_contracts(first_key)
                     current_expiry = None
                     if contracts_resp.get("status") == "success" and contracts_resp.get("data"):
-                        expiries = sorted(list(set(item["expiry_date"] for item in contracts_resp["data"])))
+                        expiries = sorted(list(set(item.get("expiry") or item.get("expiry_date") for item in contracts_resp["data"] if item.get("expiry") or item.get("expiry_date"))))
                         if expiries:
                             current_expiry = expiries[0]
                             log.debug("Current Expiry Detected: {}", current_expiry)
