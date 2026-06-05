@@ -1,60 +1,70 @@
 """
-Upstox V3 WebSocket (Protobuf) Integration using official SDK.
-Provides a client to stream real-time data.
+Upstox streaming utilities.
+
+SDK websocket integration was removed.
+This module provides polling-based REST streaming as a replacement.
 """
 from __future__ import annotations
 
-import asyncio
-import json
-import ssl
-from typing import Any, Callable
 from queue import Queue
 import threading
+import os
 
-from upstox_client import MarketDataStreamerV3
 from utils.logger import get_logger
-from data.upstox_client import make_client_from_env
+from data.upstox_client import make_client_from_env, resolve_option_instrument_master
+import time
 
 log = get_logger()
 
+
 class UpstoxStreamer:
-    """WebSocket client for Upstox V3 Market Data using official SDK."""
+    """
+    Polling-based replacement for the previous SDK websocket client.
+
+    Keeps the same public surface:
+      - connect()
+      - subscribe(instrument_keys, mode=...)
+      - disconnect()
+
+    Internally it runs a background thread that periodically fetches LTP
+    (and optionally option chain via UpstoxLiveSource logic).
+    """
 
     def __init__(self, access_token: str):
         self.access_token = access_token
-        self.streamer = MarketDataStreamerV3(access_token)
-        self._setup_callbacks()
+        self._thread = None
+        self._stop = threading.Event()
+        self.queue = Queue()
+        self.instrument_keys: list[str] = []
+        self.mode = "full"
 
-    def _setup_callbacks(self):
-        self.streamer.on("open", self._on_open)
-        self.streamer.on("message", self._on_message)
-        self.streamer.on("error", self._on_error)
-        self.streamer.on("close", self._on_close)
-
-    def _on_open(self):
-        log.info("Upstox V3 WebSocket connected.")
-
-    def _on_message(self, message):
-        log.debug(f"Received message: {message}")
-
-    def _on_error(self, error):
-        log.error(f"WebSocket error: {error}")
-
-    def _on_close(self, close_status_code, close_msg):
-        log.warning(f"WebSocket closed: {close_status_code} - {close_msg}")
+        # Reuse existing REST-capable implementation
+        self._live_source = None
 
     def connect(self):
-        """Connects to the WebSocket feed."""
-        self.streamer.connect()
+        """Start background polling."""
+        self._stop.clear()
+        if self._live_source is None:
+            # UpstoxLiveSource already starts a polling loop and pushes DataFrames to its queue.
+            # We create it lazily once connect() is called.
+            self._live_source = UpstoxLiveSource(poll_interval_sec=5.0)
+        # Mirror selected instrument keys + keep previous default behavior.
+        if self.instrument_keys:
+            # UpstoxLiveSource currently uses a single instrument_key; set it to first key for now.
+            self._live_source.instrument_key = self.instrument_keys[0]
+        self._live_source.start()
 
     def subscribe(self, instrument_keys: list[str], mode: str = "full"):
-        """Subscribes to instruments."""
-        # mode can be 'ltp', 'full'
-        self.streamer.subscribe(instrument_keys, mode)
-        log.info(f"Subscribed to {len(instrument_keys)} instruments in {mode} mode.")
+        """Register instruments to poll."""
+        self.instrument_keys = list(instrument_keys or [])
+        self.mode = mode
+        log.info("Subscribed to {} instruments in {} mode (polling)", len(self.instrument_keys), mode)
 
     def disconnect(self):
-        self.streamer.disconnect()
+        """Stop background polling."""
+        self._stop.set()
+        if self._live_source is not None:
+            self._live_source.stop()
 
 class MockWebSocket:
     """Synthetic WebSocket for testing."""
@@ -84,18 +94,59 @@ class MockWebSocket:
     def stop(self):
         self.is_running = False
 
+
 class UpstoxLiveSource:
     """
-    Live data source using Upstox SDK (polling for now, extensible to WS).
-    Uses V3 endpoints for market quotes.
+    Live data source using Upstox REST endpoints (polling).
     """
     def __init__(self, poll_interval_sec: float = 5.0):
         self.poll_interval = poll_interval_sec
         self.queue = Queue()
         self.client = make_client_from_env()
+        # Load instrument keys from environmentking fallback to a single default.
+        self.instrument_keys: list[str] = self._load_instrument_keys()
+
+        try:
+            token = (
+                getattr(self.client, "creds", None)
+                and getattr(self.client.creds, "access_token", None)
+            )
+            token_preview = (token[:6] + "..." + token[-4:]) if token else None
+        except Exception:
+            token_preview = None
+
+        log.info(
+            "UpstoxLiveSource init instrument_keys={} token_preview={}",
+            self.instrument_keys,
+            token_preview,
+        )
         self._stop = threading.Event()
         self._thread = None
-        self.instrument_key = "NSE_INDEX|Nifty 50"
+
+    def _load_instrument_keys(self) -> list[str]:
+        """Parse ``UPSTOX_SPOT_INSTRUMENT_KEY`` env var with a sensible fallback.
+
+        The original implementation returned an empty list when the variable
+        was missing, which caused the streaming loop to skip polling entirely.
+        For development and quick‑start scenarios we provide a default Spot
+        instrument key that matches the one used in the example ``WS_INSTRUMENTS``
+        configuration (the Nifty 50 index).  This ensures the dashboard can
+        display live data out‑of‑the‑box while still honouring any explicit user
+        configuration.
+
+        The variable may contain a single key or a comma‑separated list of keys.
+        Empty strings are ignored and whitespace around each key is stripped.
+        If the variable is not set or yields no keys, a default list containing
+        ``"NSE_INDEX|Nifty 50"`` is returned.
+        """
+        raw = os.getenv("UPSTOX_SPOT_INSTRUMENT_KEY", "")
+        keys = [k.strip() for k in raw.split(",") if k.strip()]
+        if not keys:
+            # Fallback to a commonly used index key – this mirrors the default
+            # used elsewhere in the project (see WS_INSTRUMENTS).
+            log.info("UPSTOX_SPOT_INSTRUMENT_KEY not set; falling back to default spot key")
+            keys = ["NSE_INDEX|Nifty 50"]
+        return keys
 
     def start(self):
         self._stop.clear()
@@ -109,49 +160,138 @@ class UpstoxLiveSource:
             self._thread.join(timeout=5)
 
     def _poll_loop(self):
-        import time
-        import pandas as pd
+        """Continuously poll market data and push transformed DataFrames to the queue.
+
+        The method fetches LTP for all configured instrument keys. For backward
+        compatibility, the first key is used as the underlying instrument when
+        fetching the option chain and building the DataFrame.
+        """
         while not self._stop.is_set():
+            # If no instrument keys are configured, skip polling and warn the user.
+            if not self.instrument_keys:
+                log.warning("No instrument keys configured for UpstoxLiveSource; skipping poll cycle.")
+                time.sleep(self.poll_interval)
+                continue
             try:
-                # Use V3 LTP endpoint
-                resp = self.client.get_market_quote_ltp([self.instrument_key])
-                if resp.get("status") == "success":
-                    data = resp.get("data", {})
-                    if self.instrument_key in data:
-                        spot = data[self.instrument_key]["last_price"]
+                # Request LTP for all configured instrument keys.
+                resp = self.client.get_market_quote_ltp(self.instrument_keys)
+                # To this (extracting status and data keys from your dictionary):
+                print(f"Market quote response: status={resp.get('status')} body={str(resp.get('data'))[:200]}...")
 
-                        # Fetch Option Chain (Still V2 as per SDK dir, but used within V3 context)
-                        from datetime import datetime, timedelta
-                        today = datetime.now()
-                        days_ahead = 3 - today.weekday()
-                        if days_ahead < 0: days_ahead += 7
-                        next_thursday = (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
-                        chain_resp = self.client.get_option_chain(self.instrument_key, next_thursday)
-                        if chain_resp.get("status") == "success":
-                            df = self._transform_chain(chain_resp["data"], spot)
-                            self.queue.put(df)
-                        else:
-                            log.error("Live Option Chain failed: {}", chain_resp.get("errors"))
+                
+                data = resp.get("data", {})
+
+                # Determine spot price using the first instrument key.
+                spot: float | None = None
+                first_key = self.instrument_keys[0]
+                if first_key in data:
+                    spot = data[first_key].get("last_price")
+
+                if resp.get("status") == "success" and first_key:
+                    # Fetch Option Chain for the first instrument key.
+                    from datetime import datetime, timedelta
+
+                    today = datetime.now()
+                    days_ahead = 3 - today.weekday()  # Thursday is weekday 3
+                    if days_ahead < 0:
+                        days_ahead += 7
+                    next_thursday = (today + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+
+                    chain_resp = self.client.get_option_chain(first_key, next_thursday)
+                    if chain_resp.get("status") == "success":
+                        underlying_name = (
+                            first_key.split("|", 1)[1]
+                            if "|" in first_key
+                            else first_key
+                        )
+                        df = self._transform_chain(
+                            chain_resp["data"],
+                            spot=spot,
+                            expiry_date=next_thursday,
+                            underlying_name=underlying_name,
+                        )
+                        self.queue.put(df)
+                    else:
+                        log.error("Live Option Chain failed: {}", chain_resp.get("errors"))
                 else:
                     log.error("Live Spot Quote (V3) failed: {}", resp.get("errors"))
             except Exception as e:
+                traceback = getattr(e, "__traceback__", None)
+                if traceback:
+                    import traceback as tb
+                    tb_str = "".join(tb.format_tb(traceback))
+                    log.error("Exception in UpstoxLiveSource (V3): {} Traceback: {}", e, tb_str)
                 log.error("Error in UpstoxLiveSource (V3): {}", e)
             time.sleep(self.poll_interval)
 
-    def _transform_chain(self, data, spot):
+    def _transform_chain(self, data, spot: float, expiry_date: str, underlying_name: str):
         import pandas as pd
+
         rows = []
         ts = pd.Timestamp.now(tz="Asia/Kolkata")
+
         for item in data:
             strike = item.get("strike_price")
+
             ce = item.get("call_options", {}).get("market_data", {})
             pe = item.get("put_options", {}).get("market_data", {})
+
+            # Resolve Upstox identifiers (token/key + tradingsymbol) per strike+CE/PE
+            ce_rec = None
+            pe_rec = None
+            try:
+                if strike is not None:
+                    ce_rec = resolve_option_instrument_master(
+                        underlying=underlying_name,
+                        expiry=expiry_date,
+                        strike=float(strike),
+                        option_type="CE",
+                    )
+                    pe_rec = resolve_option_instrument_master(
+                        underlying=underlying_name,
+                        expiry=expiry_date,
+                        strike=float(strike),
+                        option_type="PE",
+                    )
+            except Exception:
+                # Keep resilient: if lookup fails, still return market data columns.
+                ce_rec = None
+                pe_rec = None
+
             rows.append({
-                "timestamp": ts, "spot": spot, "strike": strike,
-                "ce_ltp": ce.get("ltp", 0), "ce_volume": ce.get("volume", 0), "ce_oi": ce.get("oi", 0),
-                "pe_ltp": pe.get("ltp", 0), "pe_volume": pe.get("volume", 0), "pe_oi": pe.get("oi", 0),
-                "ce_iv": 0.15, "ce_delta": 0.5, "ce_gamma": 0.001, "ce_theta": -1, "ce_vega": 0.1,
-                "pe_iv": 0.15, "pe_delta": -0.5, "pe_gamma": 0.001, "pe_theta": -1, "pe_vega": 0.1,
+                "timestamp": ts,
+                "spot": spot,
+                "expiry": expiry_date,
+                "strike": strike,
+
+                # CE identifiers + market data
+                "tradingsymbol_ce": (ce_rec or {}).get("tradingsymbol"),
+                "instrument_key_ce": (ce_rec or {}).get("instrument_key"),
+                "instrument_token_ce": (ce_rec or {}).get("instrument_token"),
+                "ce_ltp": ce.get("ltp", 0),
+                "ce_volume": ce.get("volume", 0),
+                "ce_oi": ce.get("oi", 0),
+
+                # PE identifiers + market data
+                "tradingsymbol_pe": (pe_rec or {}).get("tradingsymbol"),
+                "instrument_key_pe": (pe_rec or {}).get("instrument_key"),
+                "instrument_token_pe": (pe_rec or {}).get("instrument_token"),
+                "pe_ltp": pe.get("ltp", 0),
+                "pe_volume": pe.get("volume", 0),
+                "pe_oi": pe.get("oi", 0),
+
+                # NOTE: IV/Greeks still placeholders until feature pipeline is upgraded
+                "ce_iv": 0.15,
+                "ce_delta": 0.5,
+                "ce_gamma": 0.001,
+                "ce_theta": -1,
+                "ce_vega": 0.1,
+                "pe_iv": 0.15,
+                "pe_delta": -0.5,
+                "pe_gamma": 0.001,
+                "pe_theta": -1,
+                "pe_vega": 0.1,
             })
+
         return pd.DataFrame(rows)

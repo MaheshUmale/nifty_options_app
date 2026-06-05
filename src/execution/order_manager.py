@@ -30,7 +30,8 @@ class Order:
     order_id: str
     timestamp: pd.Timestamp
     side: OrderSide
-    instrument: str          # e.g. "NIFTY26JUN2524000CE"
+    instrument: str          # human-readable tradingsymbol (or fallback)
+    instrument_token: str   # Upstox instrument_token for routing
     strike: float
     option_side: str         # CE | PE
     quantity: int
@@ -121,6 +122,16 @@ class OrderManager:
         if st.decision != "GO":
             return None
 
+        # In paper/simulated mode we allow order placement even if the token
+        # isn't resolved yet (tests expect this behavior).
+        if st.suggested_instrument_token is None:
+            if self.live:
+                log.warning("No resolved instrument_token in state (live mode)")
+                return None
+            instrument_token = "PAPER"
+        else:
+            instrument_token = str(st.suggested_instrument_token)
+
         if st.suggested_strike is None or st.suggested_side is None:
             log.warning("No strike/side suggested in state")
             return None
@@ -137,9 +148,17 @@ class OrderManager:
             return None
         qty = lots * self.lot_size
 
-        instrument = f"NIFTY_{int(st.suggested_strike)}{st.suggested_side}"
+        instrument = st.suggested_trading_symbol or f"NIFTY_{int(st.suggested_strike)}{st.suggested_side}"
 
-        order = self._create_order(instrument, st.suggested_strike, st.suggested_side, qty, premium, st)
+        order = self._create_order(
+            instrument=instrument,
+            instrument_token=instrument_token,
+            strike=st.suggested_strike,
+            option_side=st.suggested_side,
+            qty=qty,
+            price=premium,
+            st=st,
+        )
         if self.live and self.upstox_client is not None:
             self._route_live_v3(order)
         else:
@@ -149,7 +168,15 @@ class OrderManager:
         return order
 
     def _create_order(
-        self, instrument: str, strike: float, side: str, qty: int, price: float, st: SignalState
+        self,
+        *,
+        instrument: str,
+        instrument_token: str,
+        strike: float,
+        option_side: str,
+        qty: int,
+        price: float,
+        st: SignalState,
     ) -> Order:
         self._order_counter += 1
         return Order(
@@ -157,8 +184,9 @@ class OrderManager:
             timestamp=pd.Timestamp(now_ist()),
             side="BUY",
             instrument=instrument,
+            instrument_token=instrument_token,
             strike=strike,
-            option_side=side,
+            option_side=option_side,
             quantity=qty,
             price=price,
             decision=st.decision,
@@ -177,10 +205,10 @@ class OrderManager:
             product="I",
             validity="DAY",
             price=order.price,
-            instrument_token=order.instrument,
+            instrument_token=order.instrument_token,
             order_type="LIMIT",
             transaction_type=order.side,
-            tag="nifty-options-v3"
+            tag="nifty-options-v3",
         )
 
         try:

@@ -230,12 +230,22 @@ class CompositeEngine:
         st.momentum_index = self._momentum_index(st)
 
         # ---------- 9) Master Execution Matrix ----------
-        decision, reasons, conf, strike, side = self._execution_matrix(st, cfg=cfg)
+        expiry: str | None = None
+        if "expiry" in chain.columns and not chain.empty:
+            expiry = chain["expiry"].iloc[0]
+
+        decision, reasons, conf, strike, side, suggested_instrument = self._execution_matrix(
+            st, cfg=cfg, expiry=expiry
+        )
         st.decision = decision
         st.decision_reasons = reasons
         st.confidence = conf
         st.suggested_strike = strike
         st.suggested_side = side
+
+        if suggested_instrument:
+            st.suggested_trading_symbol = suggested_instrument.get("tradingsymbol")
+            st.suggested_instrument_token = suggested_instrument.get("instrument_token")
 
         return st
 
@@ -306,12 +316,17 @@ class CompositeEngine:
 
     # ------------------------------------------------------------------ execution matrix
     def _execution_matrix(
-        self, st: SignalState, cfg: dict | None = None
-    ) -> tuple[str, list[str], float, float | None, str]:
+        self,
+        st: SignalState,
+        cfg: dict | None = None,
+        expiry: str | None = None,
+    ) -> tuple[str, list[str], float, float | None, str, dict[str, Any] | None]:
         """
         Master Composite Execution Matrix.
-        Returns: (decision, reasons, confidence, suggested_strike, suggested_side)
+        Returns: (decision, reasons, confidence, suggested_strike, suggested_side, suggested_instrument_record)
         """
+        from typing import Any  # local import to keep top imports stable
+
         reasons: list[str] = []
         cfg = cfg or {}
         risk = cfg.get("risk", {})
@@ -319,12 +334,12 @@ class CompositeEngine:
         # ---------- 0) Time-of-day filter ----------
         tctx = get_time_context(st.timestamp.to_pydatetime() if hasattr(st.timestamp, "to_pydatetime") else None)
         if not tctx.is_market_hours:
-            return "HOLD", [f"outside market hours ({tctx.block})"], 0.0, None, "CE"
+            return "HOLD", [f"outside market hours ({tctx.block})"], 0.0, None, "CE", None
 
         # ---------- 1) No-Trade overrides everything ----------
         if st.sub_no_trade == "NO_TRADE":
             reasons.append("Trap signature: flat PCR + static Max Pain + strangle OI buildup")
-            return "NO-GO", reasons, 0.9, None, "CE"
+            return "NO-GO", reasons, 0.9, None, "CE", None
 
         # ---------- 2) Matrix evaluation ----------
         go_score = 0
@@ -406,33 +421,47 @@ class CompositeEngine:
             side = "PE"
         strike = self._suggest_strike(st, side)
 
+        suggested_instrument: dict[str, Any] | None = None
+        if strike is not None and expiry:
+            try:
+                from data.upstox_client import resolve_option_instrument_master
+                # Underlying name: default to Nifty 50; can be improved later if chain carries underlying.
+                suggested_instrument = resolve_option_instrument_master(
+                    underlying="Nifty 50",
+                    expiry=expiry,
+                    strike=float(strike),
+                    option_type=side,
+                )
+            except Exception:
+                suggested_instrument = None
+
         if go_score >= required_score and go_score > no_go_score:
             # Multi-Variable Concurrent Pressure Check (Rule 4)
             vwap_ce = getattr(self, "rolling_vwap_ce", 0.0)
             vwap_pe = getattr(self, "rolling_vwap_pe", 0.0)
-            
+
             if side == "CE":
                 # Calls: Price_CE > VWAP_CE and Price_PE < VWAP_PE
                 pressure_ok = (st.call_vwap > vwap_ce) and (st.put_vwap < vwap_pe)
                 if not pressure_ok:
                     reasons = [f"Blocked by Concurrent Pressure Check: Call price (LTP={st.call_vwap:.2f}) must exceed VWAP ({vwap_ce:.2f}) and Put price (LTP={st.put_vwap:.2f}) must be below VWAP ({vwap_pe:.2f}) concurrently."]
-                    return "HOLD", reasons, 0.4, strike, side
+                    return "HOLD", reasons, 0.4, strike, side, suggested_instrument
             else:  # side == "PE"
                 # Puts: Price_PE > VWAP_PE and Price_CE < VWAP_CE (symmetric logic)
                 pressure_ok = (st.put_vwap > vwap_pe) and (st.call_vwap < vwap_ce)
                 if not pressure_ok:
                     reasons = [f"Blocked by Concurrent Pressure Check (PE): Put price (LTP={st.put_vwap:.2f}) must exceed VWAP ({vwap_pe:.2f}) and Call price (LTP={st.call_vwap:.2f}) must be below VWAP ({vwap_ce:.2f}) concurrently."]
-                    return "HOLD", reasons, 0.4, strike, side
+                    return "HOLD", reasons, 0.4, strike, side, suggested_instrument
 
             confidence = min(1.0, go_score / 6.0)
-            return "GO", go_reasons, confidence, strike, side
+            return "GO", go_reasons, confidence, strike, side, suggested_instrument
         elif no_go_score >= required_score and no_go_score > go_score:
             confidence = min(1.0, no_go_score / 6.0)
-            return "NO-GO", no_reasons, confidence, strike, side
+            return "NO-GO", no_reasons, confidence, strike, side, suggested_instrument
 
         # Default: HOLD
         reasons.append(f"insufficient conviction: go={go_score} no_go={no_go_score} required={required_score}")
-        return "HOLD", reasons, 0.3, strike, side
+        return "HOLD", reasons, 0.3, strike, side, None
 
     def _suggest_strike(self, st: SignalState, side: str) -> float | None:
         """Pick a strike to trade. For CE: ATM or slightly OTM. For PE: same logic."""

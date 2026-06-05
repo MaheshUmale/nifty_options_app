@@ -9,20 +9,23 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os, sys
+import os
+import sys
+
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 # Reconfigure stdout to use UTF-8 on Windows to support currency symbols like ₹
-if sys.platform == 'win32':
+if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding="utf-8")
     except AttributeError:
         pass
+
 from pathlib import Path
 
-from  config import get_settings
-from  utils.logger import get_logger, setup_logger
-from  utils.time_utils import now_ist
+from config import get_settings
+from utils.logger import get_logger, setup_logger
+from utils.time_utils import now_ist
 
 log = get_logger()
 
@@ -72,7 +75,7 @@ def cmd_backtest(args) -> int:
 
 def cmd_smoke(args) -> int:
     """Quick end-to-end test of feature + signal + backtest modules."""
-    from backtest.engine import Backtester, summarize
+    from backtest.engine import Backtester
     from data.mock_data import build_intraday_dataset
     from signals.composite import CompositeEngine
 
@@ -99,7 +102,9 @@ def cmd_smoke(args) -> int:
     print(f"      Call wall: {st.call_wall}, Put wall: {st.put_wall}")
     print(f"      Max pain: {st.max_pain}")
     print(f"      Momentum index: {st.momentum_index:+.3f}")
-    print(f"      Sub-signals: vol_oi={st.sub_vol_oi} gamma={st.sub_gamma} leadlag={st.sub_leadlag} notrade={st.sub_no_trade}")
+    print(
+        f"      Sub-signals: vol_oi={st.sub_vol_oi} gamma={st.sub_gamma} leadlag={st.sub_leadlag} notrade={st.sub_no_trade}"
+    )
     print(f"      DECISION: {st.decision} (conf {st.confidence:.2f})")
     for r in st.decision_reasons:
         print(f"        - {r}")
@@ -113,6 +118,7 @@ def cmd_smoke(args) -> int:
     # 4. Order manager
     print("\n[4/4] Testing order manager…")
     from execution.order_manager import OrderManager
+
     om = OrderManager(lot_size=75, max_position_notional=1_000_000, max_daily_loss=20_000)
     o = om.submit_order(st)
     if o:
@@ -128,6 +134,76 @@ def cmd_smoke(args) -> int:
     return 0
 
 
+def cmd_upstox_smoke(args) -> int:
+    """Resolve Upstox instrument identifiers for the engine's suggested strike/side."""
+    from data.mock_data import build_intraday_dataset
+    from data.upstox_client import resolve_option_instrument_master
+    from signals.composite import CompositeEngine
+
+    print("=" * 60)
+    print("UPSTOX TOKEN RESOLUTION — SMOKE TEST")
+    print("=" * 60)
+    print(f"Time: {now_ist()}")
+
+    ds = build_intraday_dataset(n_minutes=args.minutes, seed=args.seed)
+    spot_df = ds.groupby("timestamp").agg({"spot": "first", "spot_volume": "first"}).reset_index()
+    chains = [g.reset_index(drop=True) for _, g in ds.groupby("timestamp")]
+    if not chains:
+        print("No synthetic chain snapshots produced.")
+        return 1
+
+    chain0 = chains[0]
+    spot0 = float(spot_df["spot"].iloc[0])
+
+    engine = CompositeEngine()
+    st = engine.on_tick(chain=chain0, spot=spot0)
+
+    chosen_strike = st.suggested_strike
+    chosen_side = st.suggested_side
+
+    print("\n[1/2] Engine suggestion")
+    print(f"  chosen strike: {chosen_strike}")
+    print(f"  chosen side:   {chosen_side}")
+    print(f"  decision:      {st.decision} (conf {st.confidence:.2f})")
+
+    if chosen_strike is None or chosen_side is None:
+        print("No strike/side suggested; cannot resolve token.")
+        return 1
+
+    # Synthetic chains don't carry expiry; pick next Thursday for stability.
+    from datetime import datetime, timedelta
+
+    today = datetime.now()
+    days_to_thu = 3 - today.weekday()
+    if days_to_thu < 0:
+        days_to_thu += 7
+    expiry = (today + timedelta(days=days_to_thu)).strftime("%Y-%m-%d")
+
+    print("\n[2/2] Token resolution (Upstox instruments master lookup)")
+    rec = resolve_option_instrument_master(
+        underlying="Nifty 50",
+        expiry=expiry,
+        strike=float(chosen_strike),
+        option_type=str(chosen_side),
+    )
+
+    if not rec:
+        print(
+            f"  No match found for underlying=Nifty 50 expiry={expiry} strike={chosen_strike} type={chosen_side}"
+        )
+        return 1
+
+    tradingsymbol = rec.get("tradingsymbol")
+    instrument_key = rec.get("instrument_key")
+    instrument_token = rec.get("instrument_token")
+
+    print(f"  expiry:                 {expiry}")
+    print(f"  matched tradingsymbol: {tradingsymbol}")
+    print(f"  resolved instrument_key: {instrument_key}")
+    print(f"  resolved instrument_token: {instrument_token}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="nifty-options-buyer", description="NIFTY options buying system")
     sub = parser.add_subparsers(dest="cmd")
@@ -135,7 +211,7 @@ def main() -> int:
     # dashboard
     p_dash = sub.add_parser("dashboard", help="Run live dashboard")
     p_dash.add_argument("--host", default="127.0.0.1")
-    p_dash.add_argument("--port", type=int, default=8050)
+    p_dash.add_argument("--port", type=int, default=5000)
     p_dash.add_argument("--debug", action="store_true")
     p_dash.set_defaults(func=cmd_dashboard)
 
@@ -152,6 +228,13 @@ def main() -> int:
     # smoke
     p_smoke = sub.add_parser("smoke", help="Quick smoke test of all modules")
     p_smoke.set_defaults(func=cmd_smoke)
+
+    # upstox token resolution smoke
+    p_upstox = sub.add_parser("upstox-smoke", help="Resolve Upstox instrument token for chosen strike/side")
+    p_upstox.add_argument("--minutes", type=int, default=30, help="minutes of synthetic data to generate (default=30)")
+    p_upstox.add_argument("--seed", type=int, default=42)
+    p_upstox.add_argument("--expiry-days-ahead", type=int, default=3, help="used to pick next expiry proxy for synthetic test")
+    p_upstox.set_defaults(func=lambda args: cmd_upstox_smoke(args))
 
     args = parser.parse_args()
     settings = get_settings()

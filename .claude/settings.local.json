@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Bash(where python *)",
+      "Bash(/doctor *)",
+      "Bash(claude doctor *)"
     ]
   }
 }

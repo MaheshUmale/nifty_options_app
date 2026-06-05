@@ -10,10 +10,22 @@ import urllib.parse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import webbrowser
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
+# Insert the project root directory into sys.path so that the top-level
+# ``src`` package can be imported correctly. Previously we added the
+# ``src`` directory itself, which caused ``import src.data...`` to fail
+# because Python then looked for a ``src`` package inside that directory
+# (i.e., ``src/src``). By adding the root (the parent of ``src``), the
+# import resolves to the actual package.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from data.upstox_client import make_client_from_env, UpstoxCreds, UpstoxClient
-from utils.logger import setup_logger, get_logger
+# Adjust import to use the full package path now that src is on sys.path.
+# The original relative import "from data.upstox_client" failed because "data" is a submodule of the "src" package.
+# Importing via "src.data.upstox_client" ensures the module is found correctly.
+from src.data.upstox_client import make_client_from_env, UpstoxCreds, UpstoxClient
+# Import logger utilities from the correct package path. The logger module resides
+# under ``src/utils``; after adding the project root to ``sys.path`` we can import
+# it via ``src.utils.logger``.
+from src.utils.logger import setup_logger, get_logger
 
 setup_logger(level="INFO")
 log = get_logger()

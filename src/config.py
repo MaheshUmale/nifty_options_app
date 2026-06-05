@@ -70,6 +70,35 @@ def get_settings() -> dict[str, Any]:
     return _settings
 
 
+# -----------------------------
+# Upstox (TEMP hardcoded token override)
+# -----------------------------
+# NOTE: Temporary for debugging live mode. Remove/secure later.
+HARDCODED_UPSTOX_ACCESS_TOKEN =  'eyJ0eXAiOiJKV1QiLCJrZXlfaWQiOiJza192MS4wIiwiYWxnIjoiSFMyNTYifQ.eyJzdWIiOiI3NkFGMzUiLCJqdGkiOiI2YTIyNWE0OTUyY2JhMjdlNTNiNWNhZDYiLCJpc011bHRpQ2xpZW50IjpmYWxzZSwiaXNQbHVzUGxhbiI6ZmFsc2UsImlhdCI6MTc4MDYzNjIzMywiaXNzIjoidWRhcGktZ2F0ZXdheS1zZXJ2aWNlIiwiZXhwIjoxNzgwNjk2ODAwfQ.Ta_pBqybIL6RB0SrU_GPJPCwkJwTN3d7KbLBniTVems'
+
+
+def get_upstox_access_token() -> str | None:
+    """Return a valid Upstox access token.
+
+    The function first checks for an ``UPSTOX_ACCESS_TOKEN`` environment
+    variable (the preferred source for a fresh token). If the variable is not
+    present or is empty, it falls back to the temporary hard‑coded token that
+    exists in this module (used during debugging). This fallback ensures that
+    the live dashboard can still make authenticated requests during
+    development without manual token management, preventing the 401 errors the
+    user is experiencing.
+
+    Priority:
+      1) OS env var ``UPSTOX_ACCESS_TOKEN`` (stripped)
+      2) ``HARDCODED_UPSTOX_ACCESS_TOKEN`` defined above
+    """
+    token = os.getenv("UPSTOX_ACCESS_TOKEN")
+    if token:
+        return token.strip()
+    # Fallback to the temporary hard‑coded token for debugging/development.
+    return HARDCODED_UPSTOX_ACCESS_TOKEN
+
+
 if __name__ == "__main__":
     # Quick smoke test
     import json

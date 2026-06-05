@@ -69,6 +69,10 @@ class SignalState:
     suggested_strike: float | None = None
     suggested_side: str = "CE"          # CE | PE
 
+    # Upstox identifiers for order routing
+    suggested_trading_symbol: str | None = None
+    suggested_instrument_token: str | None = None
+
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         # Convert Timestamp to string for JSON
