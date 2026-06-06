@@ -64,8 +64,8 @@ The system is decoupled into three layers to ensure low latency and prevent race
 
 ### 4.1 Deployment
 1. Set up `.env` with `UPSTOX_ACCESS_TOKEN`.
-2. Run `python -m main smoke` for sanity check.
-3. Launch dashboard: `python -m main dashboard --port 8050`.
+2. Run `python3 src/main.py smoke` for sanity check.
+3. Launch dashboard: `python3 src/main.py dashboard --port 8000`.
 
 ### 4.2 Time-of-Day Blocks
 - **Opening Hour (9:15-10:15)**: High conviction required; noise from overnight hedges.
