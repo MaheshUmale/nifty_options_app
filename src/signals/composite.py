@@ -235,7 +235,7 @@ class CompositeEngine:
             expiry = chain["expiry"].iloc[0]
 
         decision, reasons, conf, strike, side, suggested_instrument = self._execution_matrix(
-            st, cfg=cfg, expiry=expiry
+            st, cfg=cfg, expiry=expiry, chain_data=chain
         )
         st.decision = decision
         st.decision_reasons = reasons
@@ -320,6 +320,7 @@ class CompositeEngine:
         st: SignalState,
         cfg: dict | None = None,
         expiry: str | None = None,
+        chain_data: pd.DataFrame | None = None,
     ) -> tuple[str, list[str], float, float | None, str, dict[str, Any] | None]:
         """
         Master Composite Execution Matrix.
@@ -422,18 +423,34 @@ class CompositeEngine:
         strike = self._suggest_strike(st, side)
 
         suggested_instrument: dict[str, Any] | None = None
-        if strike is not None and expiry:
-            try:
-                from data.upstox_client import resolve_option_instrument_master
-                # Underlying name: default to Nifty 50; can be improved later if chain carries underlying.
-                suggested_instrument = resolve_option_instrument_master(
-                    underlying="Nifty 50",
-                    expiry=expiry,
-                    strike=float(strike),
-                    option_type=side,
-                )
-            except Exception:
-                suggested_instrument = None
+        if strike is not None:
+            # First, try to resolve instrument from the input chain_data mapping
+            if chain_data is not None and not chain_data.empty:
+                row = chain_data[chain_data["strike"] == strike]
+                if not row.empty:
+                    prefix = side.lower()
+                    key = row[f"{prefix}_key"].iloc[0] if f"{prefix}_key" in row.columns else None
+                    symbol = row[f"{prefix}_symbol"].iloc[0] if f"{prefix}_symbol" in row.columns else None
+                    if key:
+                        suggested_instrument = {
+                            "instrument_key": key,
+                            "tradingsymbol": symbol,
+                            "instrument_token": key # V3 often uses key as token if not explicitly found
+                        }
+
+            # Fallback to Master Lookup if mapping failed and we have an expiry
+            if suggested_instrument is None and expiry:
+                try:
+                    from data.upstox_client import resolve_option_instrument_master
+                    # Underlying name: default to Nifty 50; can be improved later if chain carries underlying.
+                    suggested_instrument = resolve_option_instrument_master(
+                        underlying="Nifty 50",
+                        expiry=expiry,
+                        strike=float(strike),
+                        option_type=side,
+                    )
+                except Exception:
+                    suggested_instrument = None
 
         if go_score >= required_score and go_score > no_go_score:
             # Multi-Variable Concurrent Pressure Check (Rule 4)

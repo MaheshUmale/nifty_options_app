@@ -172,6 +172,8 @@
 
         function handleTick(tick) {
             // console.log("Tick received:", tick.instrument_key, tick.ltp);
+            const label = tick.symbol || tick.instrument_key;
+
             if (tick.instrument_key === "NSE_INDEX|Nifty 50" || tick.instrument_key === "NSE_INDEX:Nifty 50") {
                 spotPriceEl.innerText = `₹${tick.ltp.toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
                 lineSeries.update({
@@ -182,7 +184,7 @@
 
             const line = document.createElement('div');
             line.className = 'border-b border-gray-900 py-1 flex justify-between';
-            line.innerHTML = `<span>${tick.instrument_key}</span> <span class="font-bold">${tick.ltp}</span>`;
+            line.innerHTML = `<span>${label}</span> <span class="font-bold">${tick.ltp}</span>`;
             tickStreamEl.prepend(line);
             if (tickStreamEl.childNodes.length > 50) tickStreamEl.removeChild(tickStreamEl.lastChild);
 

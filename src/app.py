@@ -108,6 +108,7 @@ async def lifespan(app: FastAPI):
                                 option_key_to_strike_info[key] = {
                                     "strike": strike,
                                     "side": side,
+                                    "symbol": opt_data.get("tradingsymbol", f"NIFTY{strike}{side}"),
                                     "greeks": opt_data.get("option_greeks", {}),
                                     "expiry": current_expiry
                                 }
@@ -141,6 +142,7 @@ async def lifespan(app: FastAPI):
                 option_key_to_strike_info[key] = {
                     "strike": float(strike),
                     "side": side,
+                    "symbol": f"NIFTY_MOCK_{strike}{side}",
                     "greeks": {"delta": 0.5 if side == "CE" else -0.5, "gamma": 0.001, "theta": -1, "vega": 0.1, "iv": 15},
                     "expiry": "2026-06-12"
                 }
@@ -198,6 +200,12 @@ async def handle_new_tick(tick: dict[str, Any]):
     await db_manager.append_tick(db_tick)
 
     # 3. Broadcast to UI
+    # Attach human-readable symbol if we have it in our mapping
+    if instrument in option_key_to_strike_info:
+        tick["symbol"] = option_key_to_strike_info[instrument].get("symbol")
+    elif instrument == "NSE_INDEX|Nifty 50" or instrument == "NSE_INDEX:Nifty 50":
+        tick["symbol"] = "NIFTY Spot"
+
     payload = {
         "type": "tick",
         "data": tick
@@ -248,6 +256,8 @@ async def signal_feed_loop(source: WSQueueSource):
                 strikes[strike][f"{prefix}_ltp"] = tick["ltp"]
                 strikes[strike][f"{prefix}_volume"] = tick.get("volume", 0)
                 strikes[strike][f"{prefix}_oi"] = tick.get("oi", 0)
+                strikes[strike][f"{prefix}_key"] = key
+                strikes[strike][f"{prefix}_symbol"] = info.get("symbol")
 
                 # Add Greeks for Feature Engine
                 greeks = info["greeks"]
@@ -374,6 +384,7 @@ async def replay_generator(db_path: str, date_str: str):
             option_key_to_strike_info[key] = {
                 "strike": strike,
                 "side": side,
+                "symbol": f"NIFTY_{int(strike)}{side}", # Local simulation symbol
                 "greeks": {
                     "delta": row.get(f"{side.lower()}_delta"),
                     "gamma": row.get(f"{side.lower()}_gamma"),
