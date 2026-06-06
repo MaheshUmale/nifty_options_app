@@ -58,16 +58,29 @@ class SQLiteHistoricalLoader:
             "ce_lastPrice": "ce_ltp",
             "ce_openInterest": "ce_oi",
             "ce_totalTradedVolume": "ce_volume",
+            "ce_impliedVolatility": "ce_iv",
+            "ce_delta": "ce_delta",
+            "ce_gamma": "ce_gamma",
+            "ce_theta": "ce_theta",
+            "ce_vega": "ce_vega",
             "pe_lastPrice": "pe_ltp",
             "pe_openInterest": "pe_oi",
             "pe_totalTradedVolume": "pe_volume",
+            "pe_impliedVolatility": "pe_iv",
+            "pe_delta": "pe_delta",
+            "pe_gamma": "pe_gamma",
+            "pe_theta": "pe_theta",
+            "pe_vega": "pe_vega",
             "underlying_price": "spot",
             "timestamp": "ts_raw"
         }
         df = df.rename(columns=rename_map)
 
-        # Convert timestamp (seconds since epoch) to datetime
-        df["timestamp"] = pd.to_datetime(df["ts_raw"], unit='s', utc=True).dt.tz_convert("Asia/Kolkata")
+        # Convert timestamp to datetime.
+        # The data uses format YYYYMMDD_HHMMSS (e.g., 20260101_091524)
+        df["timestamp"] = pd.to_datetime(df["ts_raw"], format="%Y%m%d_%H%M%S", errors='coerce')
+        if df["timestamp"].dt.tz is None:
+            df["timestamp"] = df["timestamp"].dt.tz_localize("Asia/Kolkata")
 
         # Group by timestamp to create snapshots
         snapshots = []

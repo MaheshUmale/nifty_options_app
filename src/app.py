@@ -145,6 +145,11 @@ async def lifespan(app: FastAPI):
                     "expiry": "2026-06-12"
                 }
         asyncio.create_task(mock_tick_generator())
+    elif mode == "replay":
+        db_path = settings.get("replay", {}).get("db_path", "data/nifty_historical.db")
+        date_str = settings.get("replay", {}).get("start_date", "1-Jan-2026")
+        logger.info(f"Starting REPLAY generator (APP_MODE=replay) for {date_str} from {db_path}")
+        asyncio.create_task(replay_generator(db_path, date_str))
     else:
         logger.info(f"Live mode active (APP_MODE={mode}). Running event-driven signals.")
 
@@ -347,6 +352,68 @@ async def mock_tick_generator():
                     "volume": random.randint(100, 500),
                     "oi": random.randint(1000, 5000)
                 })
+
+async def replay_generator(db_path: str, date_str: str):
+    """
+    Streams historical ticks from a SQLite database into the live pipeline.
+    """
+    from data.historical_loader import SQLiteHistoricalLoader
+    loader = SQLiteHistoricalLoader(db_path)
+    spot_df, snapshots = loader.load_intraday_data(date_str)
+
+    if not snapshots:
+        logger.error(f"Replay failed: No data for {date_str}")
+        return
+
+    # Extract all unique option keys from first snapshot to populate option_key_to_strike_info
+    first_snap = snapshots[0]
+    for _, row in first_snap.iterrows():
+        strike = row["strike"]
+        for side in ["CE", "PE"]:
+            key = f"NSE_FO|{int(strike)}{side}"
+            option_key_to_strike_info[key] = {
+                "strike": strike,
+                "side": side,
+                "greeks": {
+                    "delta": row.get(f"{side.lower()}_delta"),
+                    "gamma": row.get(f"{side.lower()}_gamma"),
+                    "theta": row.get(f"{side.lower()}_theta"),
+                    "vega": row.get(f"{side.lower()}_vega"),
+                    "iv": row.get(f"{side.lower()}_iv")
+                },
+                "expiry": row["expiry_date"]
+            }
+
+    logger.info(f"Replaying {len(snapshots)} snapshots at 1s intervals...")
+    for snap in snapshots:
+        # 1. Spot Tick
+        spot_price = snap["spot"].iloc[0]
+        await handle_new_tick({
+            "instrument_key": "NSE_INDEX|Nifty 50",
+            "ltp": spot_price,
+            "volume": 0,
+            "oi": 0
+        })
+
+        # 2. Option Ticks
+        for _, row in snap.iterrows():
+            strike = int(row["strike"])
+            for side in ["ce", "pe"]:
+                await handle_new_tick({
+                    "instrument_key": f"NSE_FO|{strike}{side.upper()}",
+                    "ltp": row[f"{side}_ltp"],
+                    "volume": row[f"{side}_volume"],
+                    "oi": row[f"{side}_oi"],
+                    "greeks": {
+                        "delta": row.get(f"{side}_delta"),
+                        "gamma": row.get(f"{side}_gamma"),
+                        "theta": row.get(f"{side}_theta"),
+                        "vega": row.get(f"{side}_vega"),
+                        "iv": row.get(f"{side}_iv")
+                    }
+                })
+
+        await asyncio.sleep(1.0)
 
 @app.get("/")
 async def get_index(request: Request):

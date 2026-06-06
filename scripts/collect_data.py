@@ -126,15 +126,25 @@ def parse_and_store(conn, data, hist_date_str, expiry_date_str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", default="NIFTY")
-    parser.add_argument("--days", type=int, default=5)
+    parser.add_argument("--days", type=int, default=None)
+    parser.add_argument("--start", type=str, default=None, help="YYYY-MM-DD")
+    parser.add_argument("--end", type=str, default=None, help="YYYY-MM-DD")
     parser.add_argument("--db", default="data/nifty_historical.db")
     args = parser.parse_args()
 
     os.makedirs("data", exist_ok=True)
     conn = setup_database(args.db)
 
-    end_date = datetime.date.today()
-    start_date = end_date - datetime.timedelta(days=args.days)
+    if args.start:
+        start_date = datetime.datetime.strptime(args.start, "%Y-%m-%d").date()
+        if args.end:
+            end_date = datetime.datetime.strptime(args.end, "%Y-%m-%d").date()
+        else:
+            end_date = datetime.date.today()
+    else:
+        days = args.days or 5
+        end_date = datetime.date.today()
+        start_date = end_date - datetime.timedelta(days=days)
 
     current_date = start_date
     pbar = tqdm(total=args.days)
