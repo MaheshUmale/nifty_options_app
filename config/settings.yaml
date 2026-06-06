@@ -1,95 +1,16 @@
-# ============================================================================
-# NIFTY Options Buying System - Master Configuration
-# All thresholds derive from the institutional-grade spec in SKILLS.md
-# Tweak cautiously; backtest after any change.
-# ============================================================================
-
 app:
-  name: "NIFTY Options Buyer"
-  version: "0.1.0"
-  mode: "mock"               # live | mock | backtest
-  timezone: "Asia/Kolkata"
-  log_level: "INFO"
+  mode: replay
+  log_level: INFO
 
-data:
-  upstox:
-    rest_base: "https://api.upstox.com/v2"
-    ws_base: "wss://api.upstox.com/mfeed/v3"
-    rate_limit_per_sec: 50
-    max_option_keys: 5000    # LTPC
-    max_greek_keys: 3000     # option_greeks
-  refresh:
-    pcr_bucket_seconds: 300
-    signal_refresh_seconds: 5
-  storage:
-    hot_retention_hours: 8
-    cold_path: "./data/cold"
+replay:
+  db_path: data/jan_2026_sample.db
+  start_date: "5-Jan-2026"
 
-# === Feature thresholds (from research / SKILLS.md) ===
-features:
-  pcr:
-    bullish_max: 0.7        # PCR < 0.7 = call-heavy bullish
-    neutral_min: 0.7
-    neutral_max: 1.1
-    bearish_min: 1.1
-    extreme_bearish: 1.4    # PCR > 1.4 = strangle-write trap risk
-  iv:
-    crush_threshold_pct: -5 # IV drop > 5% in 15 min = crushing
-    expansion_threshold_pct: 5
-    skew_window: 15         # minutes
-  gex:
-    zero_band_pct: 0.5      # ±0.5% of spot for "near zero-gamma"
-    wall_top_pct: 5         # top 5% strikes by OI = walls
-  oi:
-    strangle_threshold: 0.8 # OI multiplier for adjacent CE+PE buildup
-  vwap:
-    rolling_minutes: 5
-  theta:
-    accel_window: 10        # minutes
-
-# === Composite signal weights (Momentum Index) ===
-signals:
-  momentum:
-    w_pcr_slope: 0.30
-    w_vwap_gap: 0.40
-    w_delta_flow: 0.30
-    buy_threshold: 0.55
-    sell_threshold: -0.55
-  execution_matrix:
-    # Strict mode requires ALL conditions. Loose mode = majority.
-    mode: "strict"
-
-# === Time-of-Day windows (IST) ===
-time_blocks:
-  morning_open:
-    start: "09:15"
-    end: "10:15"
-    threshold_multiplier: 1.0   # baseline
-  midday_lull:
-    start: "11:30"
-    end: "13:30"
-    threshold_multiplier: 1.4   # require stronger signal
-  afternoon_run:
-    start: "14:00"
-    end: "15:30"
-    threshold_multiplier: 0.85  # relax thresholds, expiry play
-
-# === Risk controls ===
 risk:
+  lot_size: 75
   max_position_notional: 1000000
   max_daily_loss: 20000
-  max_drawdown_pct: 2.0
-  stop_loss_pct: 25.0         # per-option premium stop
-  target_pct: 50.0            # per-option premium target
-  cooldown_seconds: 60        # min time between trades
-  lot_size: 75                # NIFTY lot
+  max_drawdown_pct: 10.0
 
-# === Backtest defaults ===
-backtest:
-  default_capital: 1000000
-  slippage_ticks: 1           # 0.05 INR per leg
-  commission_per_contract: 20 # INR
-  walk_forward:
-    train_days: 20
-    test_days: 5
-    step_days: 5
+data:
+  ws_instruments: ["NSE_INDEX|Nifty 50"]
