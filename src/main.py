@@ -59,14 +59,38 @@ def cmd_backtest(args) -> int:
         spot_df = ds.groupby("timestamp").agg({"spot": "first", "spot_volume": "first"}).reset_index()
         chains = [g.reset_index(drop=True) for _, g in ds.groupby("timestamp")]
     elif args.source == "sqlite":
+        import pandas as pd
         from data.historical_loader import SQLiteHistoricalLoader
         loader = SQLiteHistoricalLoader(args.db_path)
-        # Use start_date as the target date for replay
-        date_str = args.start_date or "4-Jun-2026"
-        spot_df, chains = loader.load_intraday_data(target_date=date_str)
-        if spot_df.empty:
-            log.error(f"No data found in SQLite for {date_str}")
+
+        all_dates = loader.list_available_dates()
+        if not all_dates:
+            log.error("No data found in SQLite DB")
             return 1
+
+        # Determine target dates
+        if args.start_date:
+            target_dates = [args.start_date]
+        else:
+            target_dates = all_dates
+
+        log.info(f"Running multi-day backtest across {len(target_dates)} days...")
+
+        all_spot = []
+        all_chains = []
+
+        for date_str in target_dates:
+            spot_df, chains = loader.load_intraday_data(target_date=date_str)
+            if not spot_df.empty:
+                all_spot.append(spot_df)
+                all_chains.extend(chains)
+
+        if not all_spot:
+            log.error("No valid data loaded for backtest")
+            return 1
+
+        spot_df = pd.concat(all_spot).sort_values("timestamp").reset_index(drop=True)
+        chains = all_chains
     elif args.csv:
         # Real NSE replay (CSV must contain timestamp, strike, ce_ltp, pe_ltp, etc.)
         raise NotImplementedError("NSE CSV replay not yet implemented; please contribute.")

@@ -19,6 +19,22 @@ class SQLiteHistoricalLoader:
     def __init__(self, db_path: str | Path):
         self.db_path = str(db_path)
 
+    def list_available_dates(self) -> list[str]:
+        """Returns a list of all historical_date strings in the database."""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT historical_date, timestamp FROM option_data ORDER BY timestamp ASC")
+        # Get unique dates preserving temporal order
+        seen = set()
+        dates = []
+        for row in cursor.fetchall():
+            d = row[0]
+            if d not in seen:
+                seen.add(d)
+                dates.append(d)
+        conn.close()
+        return dates
+
     def load_intraday_data(
         self,
         target_date: str,
