@@ -15,7 +15,7 @@
 
 | Key | Description |
 |-----|-------------|
-| `APP_MODE` | `live`, `mock`, or `backtest` |
+| `APP_MODE` | `live`, `mock`, `replay`, or `backtest` |
 | `UPSTOX_ACCESS_TOKEN` | Your OAuth2 access token |
 | `UPSTOX_SPOT_INSTRUMENT_KEY` | e.g. `NSE_INDEX\|Nifty 50` |
 
@@ -49,6 +49,16 @@
     "positions": { "n_positions": 1, "daily_pnl": 500 }
   }
   ```
+
+## Configuration (settings.yaml)
+
+```yaml
+app:
+  mode: replay
+replay:
+  db_path: data/nifty_historical.db
+  start_date: "5-Jan-2026"
+```
 
 ## Key Files
 
