@@ -31,6 +31,7 @@ The system is decoupled into three layers to ensure low latency and prevent race
 
 ### 2.1 Ingestion & Storage Layer
 - **Protocols**: Upstox V3 WebSocket (Protobuf). Zero-lag event-driven data ingestion.
+- **Data Frequency**: Accommodates NSE India's ~3-minute OI update interval while maintaining 1-second visual responsiveness.
 - **Normalizer**: High-frequency ticks are consolidated into 1-second buckets for signal processing.
 - **Storage**: Real-time ticks are persistently stored in **DuckDB** (`data/market_data_v3.duckdb`) using an asynchronous buffer and flusher to minimize disk I/O.
 - **Symbol Engine**: Bidirectional hash map linking exchange strings (e.g., `NIFTY26JUN2524000CE`) to Upstox `instrument_key` tokens.

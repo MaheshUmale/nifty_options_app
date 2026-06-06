@@ -12,6 +12,8 @@
 - **Zero-Lag UI**: Real-time dashboard using **Vanilla JavaScript** and **TradingView Lightweight Charts** via WebSockets.
 - **Upstox V3 Streaming**: Native integration with the official **MarketDataStreamerV3** for low-latency Protobuf-decoded ticks.
 - **Analytical Storage**: High-throughput storage layer using **DuckDB** with asynchronous batching and flushing.
+- **Historical Replay & Collection**: Tools to scrape NSE historical data into SQLite and replay them through the live pipeline for strategy validation.
+- **Instrument Mapping**: Robust internal mapping of Upstox-native instrument keys to human-readable trading symbols.
 - **5 feature modules**: PCR, IV Skew/Trend/Theta, GEX (+Walls +Zero-Gamma), OI Walls/Max Pain, VWAP.
 - **Composite signal engine** with 4 sub-signals + Master Execution Matrix decision logic.
 - **Order manager** with risk controls (max notional, daily-loss kill-switch, time stops).
@@ -66,16 +68,30 @@ python3 src/main.py dashboard --port 8000
 ```
 Opens the Zero-Lag Scalper UI at <http://127.0.0.1:8000>.
 
-### 4. Historical Data Collection & Backtesting
+### 4. Historical Data Collection & Replay
 To collect historical NSE option chain data (India):
 ```bash
-python3 scripts/collect_data.py --days 10 --db data/nifty_historical.db
+python3 scripts/collect_data.py --start 2026-01-01 --end 2026-01-10 --db data/nifty_historical.db
 ```
 
 To run a backtest on collected SQLite data:
 ```bash
-python3 src/main.py backtest --source sqlite --db-path data/nifty_historical.db --start-date "4-Jun-2026"
+python3 src/main.py backtest --source sqlite --db-path data/nifty_historical.db --start-date "5-Jan-2026"
 ```
+
+To run the dashboard in **Replay Mode** (simulated live):
+1. Configure `config/settings.yaml`:
+   ```yaml
+   app:
+     mode: replay
+   replay:
+     db_path: data/nifty_historical.db
+     start_date: "5-Jan-2026"
+   ```
+2. Launch:
+   ```bash
+   python3 src/main.py dashboard
+   ```
 
 ## 📊 The Scalper's Architecture
 
