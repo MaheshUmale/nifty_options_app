@@ -15,6 +15,10 @@ from config import get_upstox_access_token
 class UpstoxWSSource:
     """
     WebSocket client for Upstox V3 Market Data Streaming.
+
+    Connects to the Upstox API V3 and streams market data for a specified
+    list of instruments. Decodes binary Protobuf messages and invokes
+    a callback for each received tick.
     """
 
     def __init__(
@@ -32,7 +36,12 @@ class UpstoxWSSource:
         self._stop_event = asyncio.Event()
 
     async def start(self):
-        """Starts the WebSocket stream."""
+        """
+        Starts the Upstox WebSocket stream.
+
+        Initializes the ApiClient, configures the MarketDataStreamerV3,
+        and establishes the connection.
+        """
         if not self.access_token:
             logger.error("No Upstox access token provided for WebSocket.")
             return
@@ -66,7 +75,16 @@ class UpstoxWSSource:
         logger.info("Upstox WebSocket connection opened.")
 
     def _on_message(self, message):
-        """Handles incoming Protobuf/JSON messages from the SDK's background thread."""
+        """
+        Internal callback for incoming WebSocket messages.
+
+        Processes binary Protobuf or JSON data from the Upstox SDK's background
+        thread, normalizes the data into a common tick format, and schedules
+        the `on_tick` callback to be executed in the main event loop.
+
+        Args:
+            message (dict | bytes): The raw message received from the stream.
+        """
         try:
             ticks = []
             if isinstance(message, dict) and "data" in message:
@@ -107,7 +125,11 @@ class UpstoxWSSource:
         logger.warning(f"Upstox WebSocket closed: {status_code} - {message}")
 
     async def stop(self):
-        """Stops the WebSocket stream."""
+        """
+        Stops the Upstox WebSocket stream.
+
+        Disconnects the streamer and cleans up resources.
+        """
         if self.streamer:
             self.streamer.disconnect()
             logger.info("Upstox WebSocket disconnected.")
