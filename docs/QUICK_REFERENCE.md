@@ -7,6 +7,8 @@
 | **Smoke Test** | `python3 src/main.py smoke` |
 | **Run Dashboard** | `python3 src/main.py dashboard --port 8000` |
 | **Run Backtest** | `python3 src/main.py backtest --minutes 375` |
+| **Collect History** | `python3 scripts/collect_data.py --days 5` |
+| **Backtest SQLite** | `python3 src/main.py backtest --source sqlite --start-date 4-Jun-2026` |
 | **Unit Tests** | `PYTHONPATH=src python3 -m pytest tests/ -v` |
 
 ## Configuration (.env)

@@ -66,6 +66,17 @@ python3 src/main.py dashboard --port 8000
 ```
 Opens the Zero-Lag Scalper UI at <http://127.0.0.1:8000>.
 
+### 4. Historical Data Collection & Backtesting
+To collect historical NSE option chain data (India):
+```bash
+python3 scripts/collect_data.py --days 10 --db data/nifty_historical.db
+```
+
+To run a backtest on collected SQLite data:
+```bash
+python3 src/main.py backtest --source sqlite --db-path data/nifty_historical.db --start-date "4-Jun-2026"
+```
+
 ## 📊 The Scalper's Architecture
 
 The system is decoupled into five operational layers for maximum performance:

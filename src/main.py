@@ -58,6 +58,15 @@ def cmd_backtest(args) -> int:
 
         spot_df = ds.groupby("timestamp").agg({"spot": "first", "spot_volume": "first"}).reset_index()
         chains = [g.reset_index(drop=True) for _, g in ds.groupby("timestamp")]
+    elif args.source == "sqlite":
+        from data.historical_loader import SQLiteHistoricalLoader
+        loader = SQLiteHistoricalLoader(args.db_path)
+        # Use start_date as the target date for replay
+        date_str = args.start_date or "4-Jun-2026"
+        spot_df, chains = loader.load_intraday_data(target_date=date_str)
+        if spot_df.empty:
+            log.error(f"No data found in SQLite for {date_str}")
+            return 1
     elif args.csv:
         # Real NSE replay (CSV must contain timestamp, strike, ce_ltp, pe_ltp, etc.)
         raise NotImplementedError("NSE CSV replay not yet implemented; please contribute.")
@@ -238,9 +247,10 @@ def main() -> int:
     p_bt.add_argument("--seed", type=int, default=42)
     p_bt.add_argument("--capital", type=float, default=1_000_000)
     p_bt.add_argument("--lot-size", type=int, default=75)
-    p_bt.add_argument("--source", choices=["synthetic", "nse", "db"], default="synthetic")
+    p_bt.add_argument("--source", choices=["synthetic", "nse", "db", "sqlite"], default="synthetic")
     p_bt.add_argument("--csv", type=str, default=None)
-    p_bt.add_argument("--start-date", type=str, default=None, help="YYYY-MM-DD for DB source")
+    p_bt.add_argument("--db-path", type=str, default="data/nifty_historical.db", help="Path to SQLite DB")
+    p_bt.add_argument("--start-date", type=str, default=None, help="YYYY-MM-DD for DB source or D-Mon-YYYY for sqlite")
     p_bt.add_argument("--end-date", type=str, default=None, help="YYYY-MM-DD for DB source")
     p_bt.set_defaults(func=cmd_backtest)
 
